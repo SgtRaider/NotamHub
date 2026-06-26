@@ -1,0 +1,9 @@
+# Ficheros que NO deben servirse como estáticos (Cloudflare Static Assets).
+_worker.js
+wrangler.toml
+.assetsignore
+.gitignore
+.git
+README.md
+serve.py
+start.bat

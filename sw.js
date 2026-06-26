@@ -9,7 +9,7 @@
  * Para forzar invalidación al desplegar nueva versión, sube CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'notamhub-v1';
+const CACHE_VERSION = 'notamhub-v2';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -18,6 +18,7 @@ const SHELL_ASSETS = [
   './index.html',
   './manifest.json',
   './css/styles.css',
+  './css/notamhub.css',
   './assets/icon.svg',
   './js/geom.js',
   './js/offlineGeo.js',

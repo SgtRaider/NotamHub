@@ -1,0 +1,257 @@
+/* notamhub.css — Capa de identidad NotamHub (se carga DESPUÉS de styles.css).
+ *
+ * Dos objetivos:
+ *  1) Cambiar la DISTRIBUCIÓN: la navegación pasa del header superior a un
+ *     RAIL VERTICAL a la izquierda (el mapa y el panel se desplazan a su
+ *     derecha). El stepper queda como columna de iconos.
+ *  2) Renovar el LENGUAJE VISUAL: tarjetas más planas y redondeadas con barra
+ *     de acento, botones y chips nuevos, tipografía condensada en títulos y
+ *     estados activos en teal (en vez del relleno ámbar original).
+ */
+
+:root {
+  --nh-rail-w:       86px;
+  --nh-accent-soft:  rgba(31, 195, 214, 0.16);
+  --nh-accent-bd:    rgba(31, 195, 214, 0.45);
+  --nh-card-bg:      #0c2c33;
+  --nh-card-radius:  14px;
+  --nh-elev:         0 6px 18px rgba(0, 12, 16, 0.45);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   1. DISTRIBUCIÓN — rail lateral en lugar de header superior
+   ════════════════════════════════════════════════════════════════ */
+.b1-shell {
+  /* De [rows: header / main] a [cols: rail | main] */
+  grid-template-rows: 1fr !important;
+  grid-template-columns: var(--nh-rail-w) 1fr !important;
+  /* Ya no hay header arriba: el offset superior de toolbar/leaflet-top baja. */
+  --b1-header-h: 12px;
+}
+
+/* El antiguo .b1-header se convierte en el rail vertical (columna 1). */
+.b1-header {
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  height: 100%;
+  padding: var(--sp-3) 8px;
+  gap: var(--sp-3);
+  border-bottom: none;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--bg-elev), var(--bg-panel) 55%);
+}
+
+.b1-brand { flex-direction: column; gap: 5px; text-align: center; }
+.b1-brand img { height: 36px !important; width: auto; }
+.b1-brand-name {
+  font-family: 'Archivo Narrow', 'Archivo', Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.b1-stepper {
+  flex-direction: column;
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  align-items: stretch;
+  gap: 6px;
+  width: 100%;
+  margin-top: var(--sp-2);
+}
+.b1-step {
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 11px 4px;
+  border-radius: 12px;
+  font-family: 'Archivo Narrow', 'Archivo', Arial, sans-serif;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  position: relative;
+  color: var(--text-mute);
+}
+.b1-step .b1-step-icon { width: 23px; height: 23px; flex: 0 0 23px; }
+.b1-step:hover { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.b1-step.is-active {
+  background: var(--nh-accent-soft);
+  color: #ffffff;
+}
+.b1-step.is-active::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 16%; bottom: 16%;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.b1-actions {
+  flex-direction: column;
+  width: 100%;
+  margin-top: auto;
+  gap: 6px;
+  align-items: center;
+}
+.b1-net-status {
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  text-align: center;
+  color: var(--text-mute);
+}
+.b1-net-status.is-offline { color: var(--warn); }
+.b1-icon-btn { width: 34px; height: 34px; }
+
+/* El "rail de panel colapsado" original es redundante con el rail de nav:
+   lo ocultamos para no duplicar iconos cuando se colapsa el panel. */
+.b1-shell[data-panel-state="collapsed"] .b1-panel-rail { display: none !important; }
+
+/* ════════════════════════════════════════════════════════════════
+   2. LENGUAJE VISUAL
+   ════════════════════════════════════════════════════════════════ */
+
+/* Panel y cuerpo */
+.b1-panel { background: var(--bg-panel); }
+.b1-panel-body { padding: var(--sp-4); }
+.b1-panel-resize:hover,
+.b1-panel-resize.b1-dragging { background: var(--accent); }
+
+/* Títulos: condensados, en versalitas, con filete de acento a la izquierda. */
+.b1-panel-body h2,
+.notam-section-title,
+.settings-card > h3,
+.notamhub-title,
+.table-header h2 {
+  font-family: 'Archivo Narrow', 'Archivo', Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+.settings-card > h3,
+.notamhub-title {
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+}
+
+/* Tarjetas: planas, redondeadas, con sombra suave. */
+.notamhub-card,
+.notam-toolbar-card,
+.notam-section,
+.settings-card,
+.feature,
+.table-wrap,
+.home-disclaimer,
+.notam-card {
+  background: var(--nh-card-bg) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--nh-card-radius) !important;
+  box-shadow: var(--nh-elev);
+}
+.feature { transition: transform 0.12s ease, border-color 0.12s ease; }
+.feature:hover { transform: translateY(-2px); border-color: var(--nh-accent-bd) !important; }
+
+/* Etiqueta "RECOMENDADO" y badges → teal en vez de ámbar. */
+.notamhub-tag {
+  background: var(--nh-accent-soft) !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--nh-accent-bd) !important;
+  letter-spacing: 1px;
+}
+.badge-foreign {
+  background: var(--nh-accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--nh-accent-bd);
+  border-radius: var(--r-pill);
+  padding: 0 7px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* Botones */
+.btn {
+  border-radius: 9px;
+  font-family: 'Archivo', Arial, sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  transition: filter 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary {
+  background: var(--accent) !important;
+  color: #04222a !important;
+  border: 1px solid var(--accent) !important;
+  font-weight: 700;
+}
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-ghost {
+  background: transparent !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-mute) !important;
+}
+.btn-ghost:hover { border-color: var(--nh-accent-bd) !important; color: var(--text) !important; }
+.btn-ghost.is-active {
+  background: var(--nh-accent-soft) !important;
+  border-color: var(--nh-accent-bd) !important;
+  color: #fff !important;
+}
+
+/* Chips de filtro TSA: activo en teal (en vez de ámbar). */
+.tsa-chip.is-active {
+  background: var(--nh-accent-soft);
+  border-color: var(--nh-accent-bd);
+  color: #fff;
+}
+
+/* Toolbar del mapa: botón activo en teal coherente. */
+.b1-map-toolbar .btn.is-active {
+  background: var(--accent) !important;
+  color: #04222a !important;
+  border-color: var(--accent) !important;
+}
+
+/* Pestañas del cajón inferior. */
+.b1-drawer-tab.is-active {
+  background: var(--nh-accent-soft);
+  color: #fff;
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Modal de bienvenida acorde a la nueva identidad. */
+.welcome-card {
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 50px rgba(0, 10, 14, 0.6);
+}
+.welcome-logo { filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4)); }
+
+/* Hero de Inicio. */
+.home-hero h2 {
+  font-family: 'Archivo Narrow', 'Archivo', Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ── Responsive: en pantallas estrechas el rail se hace barra inferior. ── */
+@media (max-width: 720px) {
+  .b1-shell {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: 1fr var(--nh-rail-w) !important;
+    --b1-header-h: 12px;
+  }
+  .b1-header {
+    flex-direction: row;
+    height: auto;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    order: 2;
+  }
+  .b1-main { order: 1; }
+  .b1-stepper { flex-direction: row; margin-top: 0; justify-content: space-around; }
+  .b1-step { padding: 6px 4px; }
+  .b1-brand { display: none; }
+  .b1-actions { flex-direction: row; width: auto; margin-top: 0; }
+}

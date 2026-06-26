@@ -1,0 +1,15 @@
+# Configuración para desplegar NotamHub como Cloudflare Worker con Static Assets.
+#
+#   npx wrangler deploy        # despliega a <name>.<subdominio>.workers.dev
+#   npx wrangler dev           # desarrollo local (con los proxies /api/* activos)
+#
+# El Worker (_worker.js) sirve los estáticos vía el binding ASSETS y hace de
+# proxy de /api/notamhub/* y /api/awc/*. Define el token como secreto:
+#   npx wrangler secret put NOTAMHUB_USER_TOKEN
+name = "notamhub"
+main = "_worker.js"
+compatibility_date = "2024-11-01"
+
+[assets]
+directory = "."
+binding = "ASSETS"

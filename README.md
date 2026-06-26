@@ -51,10 +51,13 @@ js/
   i18n.js               Internacionalización (es/en)
   geom.js               Utilidades geométricas
   offlineGeo.js         Cartografía Natural Earth embebida
-functions/api/
-  notamhub/[[path]].js  Proxy → https://notamhub.duckdns.org (inyecta token)
-  awc/[[path]].js       Proxy → https://aviationweather.gov (METAR/TAF/SIGMET)
+_worker.js              Worker: sirve estáticos + proxy /api/notamhub y /api/awc
+wrangler.toml           Config de despliegue (Cloudflare Worker + Static Assets)
 ```
+
+> `notamhub.duckdns.org` y `aviationweather.gov` no envían cabeceras CORS, por
+> lo que el navegador no puede llamarlos directamente: las peticiones pasan por
+> el proxy same-origin del Worker (`/api/*`).
 
 Todo cuelga del namespace global `window.NotamHub`. Cada módulo es un IIFE que
 registra un sub-objeto; no hay paso de *build*.
@@ -64,26 +67,35 @@ registra un sub-objeto; no hay paso de *build*.
 Necesita servirse por HTTP (no `file://`) para evitar problemas de CORS:
 
 ```sh
+npx wrangler dev       # http://localhost:8787 — RECOMENDADO (proxies /api/* activos)
+# alternativas SOLO para la UI (la carga de NOTAMs fallará por CORS):
 python serve.py        # http://127.0.0.1:8000
-# o, en Windows:
-start.bat
-# o:
-npx http-server -p 8000
+start.bat              # Windows
 ```
 
-En local, el cliente llama directamente a las APIs externas (puede fallar por
-CORS según el navegador). En producción usa los *proxies* same-origin `/api/*`.
+Para que la carga de NOTAMs/meteo funcione en local hace falta el proxy del
+Worker, así que usa `npx wrangler dev` (sirve estáticos + `/api/*`). Servir solo
+los ficheros estáticos (serve.py / http-server) muestra la UI pero las llamadas
+a las APIs externas fallan por CORS.
 
-## Despliegue (Cloudflare Pages)
+## Despliegue (Cloudflare Worker)
 
-1. Conecta el repositorio a Cloudflare Pages (framework preset: *None*; sin
-   comando de build; directorio de salida: la raíz).
-2. Las funciones de `functions/api/*` se despliegan automáticamente.
-3. Configura la variable de entorno (Settings → Environment Variables,
-   marcando **Encrypt**):
-   - `NOTAMHUB_USER_TOKEN` — token de la API NotamHub. Si no se define, el proxy
-     usa un valor por defecto incluido en el código (suficiente para arrancar,
-     recomendable rotarlo y moverlo a la variable de entorno).
+```sh
+npx wrangler deploy
+```
+
+Despliega a `https://<name>.<subdominio>.workers.dev` usando `wrangler.toml`
+(Worker `_worker.js` + Static Assets). Configura el token como secreto:
+
+```sh
+npx wrangler secret put NOTAMHUB_USER_TOKEN
+```
+
+Si no se define, el proxy usa un token por defecto incluido en `_worker.js`
+(suficiente para arrancar; recomendable rotarlo y moverlo al secreto).
+
+**Cloudflare Pages** también funciona: `_worker.js` en la raíz activa el
+*advanced mode* (sirve `env.ASSETS` + los proxies), sin necesidad de `functions/`.
 
 ## Fuentes de datos y atribución
 
