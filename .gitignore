@@ -1,0 +1,21 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+.vscode/
+.idea/
+
+# Node / tooling (por si se añade más adelante)
+node_modules/
+npm-debug.log*
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+.env
+.env.*
+
+# Logs y temporales
+*.log
+*.tmp

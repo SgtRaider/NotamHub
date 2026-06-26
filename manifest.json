@@ -1,0 +1,27 @@
+{
+  "name": "NotamHub — NOTAMs, TSAs y meteorología",
+  "short_name": "NotamHub",
+  "description": "Visor civil de NOTAMs y TSAs (nacionales y de FIRs colindantes) y meteorología aeronáutica (METAR/TAF, SIGMETs, nubosidad y tormentas por satélite) sobre un mapa offline. PWA instalable.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07191d",
+  "theme_color": "#0c343b",
+  "categories": ["productivity", "utilities", "navigation"],
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

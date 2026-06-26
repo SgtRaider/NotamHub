@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NotamHub — NOTAMs, TSAs y meteorología</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0c343b">
+  <meta name="application-name" content="NotamHub">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NotamHub">
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg">
+  <link rel="apple-touch-icon" href="assets/icon.svg">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Archivo+Narrow:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="b1">
+
+<!-- Modal de bienvenida (aviso civil) -->
+<div id="welcome-modal" class="welcome-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+  <div class="welcome-card">
+    <div class="welcome-head">
+      <img src="assets/icon.svg" alt="" class="welcome-logo" width="56" height="56">
+      <div>
+        <h2 id="welcome-title">NotamHub</h2>
+        <div class="welcome-sub">Visor civil de NOTAMs, TSAs y meteorología aeronáutica</div>
+      </div>
+    </div>
+
+    <div class="welcome-body">
+      <div class="home-disclaimer disclaimer-warn">
+        <div class="disc-head">
+          <span class="disc-icon" aria-hidden="true">⚠</span>
+          <span class="disc-title">USO INFORMATIVO — NO OPERACIONAL</span>
+        </div>
+        <p>
+          NotamHub es una herramienta de <b>apoyo informativo</b>. Los datos de
+          NOTAMs, TSAs y meteorología proceden de fuentes públicas de terceros y
+          <b>pueden contener errores, retrasos o estar incompletos</b>. No
+          sustituye al <b>briefing oficial</b> ni a las publicaciones aeronáuticas
+          (AIP, NOTAM-PIB de ENAIRE / proveedor AIS). La responsabilidad de la
+          planificación y la decisión final del vuelo recae siempre en el piloto.
+        </p>
+      </div>
+
+      <div class="home-disclaimer disclaimer-info">
+        <div class="disc-head">
+          <span class="disc-icon" aria-hidden="true">🌐</span>
+          <span class="disc-title">CONEXIÓN A INTERNET</span>
+        </div>
+        <p>
+          Las capas de datos externos (NOTAMs/TSAs vía NotamHub API, METAR/TAF de
+          AWC, nubosidad RainViewer, Cloud Top Height / tormentas de EUMETSAT,
+          SIGMETs) requieren conexión. El <b>mapa base es offline</b> y la app
+          sigue funcionando como PWA tras la primera carga; los datos en vivo se
+          actualizan cuando hay red.
+        </p>
+      </div>
+    </div>
+
+    <div class="welcome-footer">
+      <label class="welcome-confirm">
+        <input type="checkbox" id="welcome-check">
+        He leído y acepto las condiciones anteriores.
+      </label>
+      <button id="welcome-accept" class="btn btn-primary" type="button" disabled>
+        Aceptar y continuar
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="app">
+
+  <!-- Barra de filtro de TSAs (la adopta el shell dentro de "Datos") -->
+  <section id="filter-bar" class="filter-bar hidden">
+    <div class="filter-chips" id="tsa-filter-chips">
+      <button type="button" class="tsa-chip is-active" data-tsa-filter="all">Todas <span class="tsa-chip-count" data-count="all">0</span></button>
+      <button type="button" class="tsa-chip tsa-chip-work"    data-tsa-filter="work">Work <span class="tsa-chip-count" data-count="work">0</span></button>
+      <button type="button" class="tsa-chip tsa-chip-transit" data-tsa-filter="transit">Transit <span class="tsa-chip-count" data-count="transit">0</span></button>
+      <button type="button" class="tsa-chip tsa-chip-now"     data-tsa-filter="active-now">Activas ahora <span class="tsa-chip-count" data-count="active-now">0</span></button>
+    </div>
+    <div class="filter-group">
+      <label>Fecha desde <input type="date" id="filter-date-from"></label>
+      <label>Fecha hasta <input type="date" id="filter-date-to"></label>
+      <label>Hora desde (UTC) <input type="time" id="filter-time-from"></label>
+      <label>Hora hasta (UTC) <input type="time" id="filter-time-to"></label>
+    </div>
+    <div class="filter-actions">
+      <button id="btn-filter-apply" class="btn">Aplicar</button>
+      <button id="btn-filter-clear" class="btn btn-ghost">Limpiar</button>
+      <span id="filter-summary" class="filter-summary"></span>
+    </div>
+  </section>
+
+  <main>
+
+    <!-- INICIO -->
+    <section id="tab-home" class="tab-content active">
+      <div class="home-hero">
+        <h2>NOTAMs, TSAs y meteorología en un mapa</h2>
+        <p class="home-lead">
+          NotamHub reúne en un único visor los <b>NOTAMs</b> y <b>TSAs</b>
+          (nacionales y de las <b>FIR colindantes / fuera de España</b>), la
+          <b>meteorología aeronáutica</b> (METAR/TAF, SIGMETs, nubosidad y
+          tormentas por satélite) y un <b>mapa offline</b>, para apoyar la
+          preparación del vuelo.
+        </p>
+      </div>
+
+      <div class="home-features">
+        <h3>Funcionalidades</h3>
+        <div class="feature-grid">
+          <div class="feature">
+            <div class="feature-title">NOTAMs / TSAs</div>
+            <div class="feature-desc">Descarga directa desde la <b>API NotamHub</b>
+              (ICARO / ENAIRE): TSAs activas a la hora elegida o por rango, NOTAMs
+              por aeródromo y FIR, y <b>NOTAMs de FIRs colindantes</b> (fuera de
+              España) por área del mapa. <a href="https://notamhub.duckdns.org/docs" target="_blank" rel="noopener noreferrer">Doc del API ↗</a></div>
+          </div>
+          <div class="feature">
+            <div class="feature-title">Mapa offline</div>
+            <div class="feature-desc">Cartografía Natural Earth integrada (sin
+              tiles online). Polígonos de TSAs y NOTAMs con área, coloreados por
+              tipo/altitud, leyenda flotante de TSAs activas y capas meteo
+              activables.</div>
+          </div>
+          <div class="feature">
+            <div class="feature-title">Meteorología</div>
+            <div class="feature-desc">METAR/TAF decodificados al español, capa
+              Cloud Top Height (MSG), tormentas eléctricas (MTG LI AFA), RGB
+              Convección, RainViewer IR y SIGMETs internacionales (AWC) sobre el
+              mapa.</div>
+          </div>
+          <div class="feature">
+            <div class="feature-title">Briefing meteo del aeródromo</div>
+            <div class="feature-desc">Tablero <b>Weather Hold</b>: clasifica
+              METAR/TAF frente a tus mínimos (techo, visibilidad, viento) en
+              verde / amarillo / rojo, junto a la lista de NOTAMs operativos del
+              aeródromo con detección de cierres.</div>
+          </div>
+          <div class="feature">
+            <div class="feature-title">PWA instalable</div>
+            <div class="feature-desc">App instalable que funciona offline tras la
+              primera carga (Service Worker). Interfaz adaptable a escritorio y
+              tablet.</div>
+          </div>
+          <div class="feature">
+            <div class="feature-title">Datos abiertos</div>
+            <div class="feature-desc">Fuentes públicas: NotamHub API, NOAA AWC,
+              RainViewer, EUMETSAT. Sin cuentas ni credenciales por parte del
+              usuario.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="home-cta">
+        <p class="hint">Empieza en <b>Datos</b> para descargar las TSAs y NOTAMs
+          activos; consúltalos sobre el mapa y revisa el aeródromo en
+          <b>Briefing</b>.</p>
+      </div>
+    </section>
+
+    <!-- DATOS / CARGAR -->
+    <section id="tab-upload" class="tab-content">
+
+      <div class="notamhub-card">
+        <div class="notamhub-head">
+          <span class="notamhub-tag">RECOMENDADO</span>
+          <h2 class="notamhub-title">Carga directa NotamHub</h2>
+        </div>
+        <p class="notamhub-desc">Descarga las <b>TSAs activas</b> y NOTAMs publicados (ICARO / ENAIRE) sin
+          necesidad de boletín PDF. Acepta hora puntual o <b>rango de fechas</b> (devuelve TSAs
+          con alguna ventana solapando el periodo). La conexión va vía el proxy del servidor con token de
+          API. <a href="https://notamhub.duckdns.org/docs" target="_blank" rel="noopener noreferrer">Doc del API ↗</a></p>
+        <div class="notamhub-actions">
+          <label class="notamhub-input-label">Desde (UTC, opcional)
+            <input type="datetime-local" id="notamhub-at" autocomplete="off">
+          </label>
+          <label class="notamhub-input-label">Hasta (UTC, opcional)
+            <input type="datetime-local" id="notamhub-at-to" autocomplete="off">
+          </label>
+          <button id="btn-notamhub-load" class="btn btn-primary" type="button">📡 Cargar TSAs activas</button>
+        </div>
+        <div class="notamhub-presets">
+          <span class="notamhub-presets-label">Presets:</span>
+          <button class="btn btn-ghost btn-sm" type="button" data-notamhub-preset="now">Ahora</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-notamhub-preset="next6">Próximas 6 h</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-notamhub-preset="next24">Próximas 24 h</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-notamhub-preset="next48">Próximas 48 h</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-notamhub-preset="next7d">Próximos 7 días</button>
+          <button class="btn btn-ghost btn-sm" type="button" data-notamhub-preset="clear">Limpiar</button>
+        </div>
+        <label class="notamhub-foreign-toggle">
+          <input type="checkbox" id="notamhub-foreign"> Incluir <b>NOTAMs de FIRs colindantes</b> (fuera de España) en el área visible del mapa
+        </label>
+        <div id="notamhub-status" class="status"></div>
+      </div>
+
+      <div id="tsa-table-wrap" class="table-wrap hidden">
+        <div class="table-header">
+          <h2>NOTAMs / TSAs cargadas <span id="tsa-count" class="badge"></span></h2>
+          <div class="table-actions">
+            <span id="selection-summary" class="chip"></span>
+            <button id="btn-select-all" class="btn btn-ghost" type="button">Todas</button>
+            <button id="btn-select-none" class="btn btn-ghost" type="button">Ninguna</button>
+          </div>
+        </div>
+        <p class="hint">Marca cada área para incluirla en el mapa. Las filas atenuadas están fuera del filtro de fecha/hora.</p>
+        <div class="table-scroll">
+          <table id="tsa-table">
+            <thead>
+              <tr>
+                <th class="col-check"><input type="checkbox" id="tsa-select-all-cb" checked title="Seleccionar todas"></th>
+                <th>Nombre</th>
+                <th>Origen</th>
+                <th>Lím. inferior</th>
+                <th>Lím. superior</th>
+                <th>Vértices</th>
+                <th>Ventanas horarias</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAPA (siempre visible; el shell mueve #map a pantalla completa) -->
+    <section id="tab-map" class="tab-content">
+      <div class="toolbar">
+        <span id="map-count" class="chip"></span>
+        <button id="btn-fit-bounds" class="btn btn-ghost" type="button"
+          aria-label="Centrar mapa en las áreas visibles"
+          title="Centrar mapa en las áreas visibles">Centrar</button>
+        <button id="btn-map-legend" class="btn btn-ghost" type="button"
+          aria-pressed="false" aria-label="Mostrar u ocultar leyenda de TSAs"
+          title="Leyenda de TSAs visibles">Leyenda</button>
+        <button id="btn-map-layers" class="btn btn-ghost is-active" type="button"
+          aria-pressed="true" aria-label="Mostrar u ocultar control de capas del mapa"
+          title="Capas del mapa (meteo)">Capas</button>
+      </div>
+      <div id="map"></div>
+    </section>
+
+    <!-- BRIEFING / NOTAMs del aeródromo + Weather Hold -->
+    <section id="tab-notams" class="tab-content">
+      <div class="notam-toolbar-card">
+        <div class="notam-toolbar-row">
+          <label class="notam-input-label">
+            <span>Aeródromos <span class="dim">(ICAO, separados por espacio)</span></span>
+            <input type="text" id="notam-icaos" placeholder="LEMD LEBL" autocomplete="off" spellcheck="false">
+          </label>
+          <div class="notam-toolbar-buttons">
+            <button id="btn-notam-load" class="btn btn-primary" type="button">🔍 Consultar</button>
+          </div>
+        </div>
+        <div id="notam-status" class="status notam-status-bar"></div>
+      </div>
+
+      <section class="notam-section">
+        <header class="notam-section-header">
+          <h2 class="notam-section-title"><span class="notam-section-icon">⛅</span> Weather Hold</h2>
+          <p class="notam-section-sub">METAR / TAF vs mínimos configurados en <b>Ajustes → Mínimos meteorológicos</b>.
+            <span class="legend-pill legend-pill-green">Verde · sin limitaciones</span>
+            <span class="legend-pill legend-pill-yellow">Amarillo · marginal</span>
+            <span class="legend-pill legend-pill-red">Rojo · no go</span></p>
+        </header>
+        <div id="notam-wx-board"></div>
+      </section>
+
+      <section class="notam-section">
+        <header class="notam-section-header">
+          <h2 class="notam-section-title"><span class="notam-section-icon">📋</span> NOTAMs del aeródromo</h2>
+          <p class="notam-section-sub">NOTAMs operativos publicados para los aeródromos consultados. <span class="dim">Apartados de áreas / espacio aéreo segregado omitidos automáticamente.</span> Fuente: <b>NotamHub</b>.</p>
+        </header>
+        <div id="notam-results"></div>
+      </section>
+    </section>
+
+    <!-- AJUSTES -->
+    <section id="tab-settings" class="tab-content">
+
+      <div class="settings-card">
+        <h3>Opacidad de capas del mapa</h3>
+        <p class="hint">Cambios aplicados al instante. Los valores se guardan localmente en este navegador.</p>
+        <div class="settings-grid">
+          <label class="settings-row">
+            <span class="settings-name">Fondo de países</span>
+            <input type="range" min="0" max="100" data-setting="opacity.country">
+            <output class="settings-value"></output>
+          </label>
+          <label class="settings-row">
+            <span class="settings-name">TSAs / NOTAMs (relleno)</span>
+            <input type="range" min="0" max="100" data-setting="opacity.tsaFill">
+            <output class="settings-value"></output>
+          </label>
+          <label class="settings-row">
+            <span class="settings-name">Capa nubes RainViewer IR</span>
+            <input type="range" min="0" max="100" data-setting="opacity.cloudRV">
+            <output class="settings-value"></output>
+          </label>
+          <label class="settings-row">
+            <span class="settings-name">Capa Cloud Top Height (EUMETSAT)</span>
+            <input type="range" min="0" max="100" data-setting="opacity.cloudCTH">
+            <output class="settings-value"></output>
+          </label>
+          <label class="settings-row">
+            <span class="settings-name">Tormentas eléctricas (MTG LI AFA)</span>
+            <input type="range" min="0" max="100" data-setting="opacity.cloudLI">
+            <output class="settings-value"></output>
+          </label>
+          <label class="settings-row">
+            <span class="settings-name">RGB Convección (MSG SEVIRI)</span>
+            <input type="range" min="0" max="100" data-setting="opacity.cloudConv">
+            <output class="settings-value"></output>
+          </label>
+          <label class="settings-row">
+            <span class="settings-name">SIGMETs (relleno)</span>
+            <input type="range" min="0" max="100" data-setting="opacity.sigmet">
+            <output class="settings-value"></output>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3>Mínimos meteorológicos (Weather Hold)</h3>
+        <p class="hint">Umbrales que el <b>Briefing</b> usa para clasificar METAR/TAF del aeródromo en verde / amarillo / rojo.
+          <b>Hard</b> = límite absoluto (rojo, no-go). <b>Marginal</b> = a partir de aquí amarillo.</p>
+        <div class="settings-fields">
+          <label>Techo HARD (ft AGL)
+            <input type="number" data-setting="wxLimits.ceilingHardFt" min="0" step="100">
+          </label>
+          <label>Techo MARGINAL (ft AGL)
+            <input type="number" data-setting="wxLimits.ceilingMarginalFt" min="0" step="100">
+          </label>
+          <label>Visibilidad HARD (m)
+            <input type="number" data-setting="wxLimits.visibilityHardM" min="0" step="100">
+          </label>
+          <label>Visibilidad MARGINAL (m)
+            <input type="number" data-setting="wxLimits.visibilityMarginalM" min="0" step="100">
+          </label>
+          <label>Viento HARD (kt)
+            <input type="number" data-setting="wxLimits.windHardKt" min="0" step="1">
+          </label>
+          <label>Viento MARGINAL (kt)
+            <input type="number" data-setting="wxLimits.windMarginalKt" min="0" step="1">
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3 data-i18n="set.lang">Idioma</h3>
+        <p class="hint">Cambio en caliente sin recargar. Cobertura parcial — los strings más visibles se traducen.</p>
+        <div class="settings-actions">
+          <label><input type="radio" name="i18n-lang" value="es"> <span data-i18n="set.lang.es">Español</span></label>
+          <label><input type="radio" name="i18n-lang" value="en"> <span data-i18n="set.lang.en">English</span></label>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3>Otros</h3>
+        <div class="settings-actions">
+          <button id="btn-settings-show-welcome" class="btn" type="button">Mostrar el aviso la próxima vez</button>
+          <button id="btn-settings-reset" class="btn" type="button">Restaurar valores de fábrica</button>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+</div>
+
+<!-- Librerías (CDN) -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Módulos NotamHub -->
+<script src="js/geom.js"></script>
+<script src="js/offlineGeo.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/scheduleFmt.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/filters.js"></script>
+<script src="js/metarDecode.js"></script>
+<script src="js/meteoApi.js"></script>
+<script src="js/notamHub.js"></script>
+<script src="js/notamView.js"></script>
+<script src="js/mapView.js"></script>
+<script src="js/app.js"></script>
+<script src="js/shell.js"></script>
+
+<!-- Service Worker (PWA) -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch((err) => {
+        console.warn('[PWA] No se pudo registrar el Service Worker:', err);
+      });
+    });
+    let _swRefreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (_swRefreshing) return;
+      _swRefreshing = true;
+      console.info('[PWA] Service Worker actualizado — recargando página.');
+      window.location.reload();
+    });
+  }
+</script>
+
+</body>
+</html>
