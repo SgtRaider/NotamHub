@@ -754,6 +754,46 @@ window.NotamHub.notamHub = (function () {
     };
   }
 
+  // ── Clasificación de NOTAMs extranjeros por Q-code ────────────────
+  // El Q-code ICAO es Q + subject(2 letras) + condition(2 letras). El
+  // "subject" (chars 2-3) determina la naturaleza. Mapeamos a categorías
+  // con etiqueta y color para el mapa/leyenda/tabla. (El keyword del API
+  // viene casi siempre "INTERNATIONAL", inservible para clasificar.)
+  const FOREIGN_CATEGORY_META = {
+    restricted: { label: 'Restringida / Prohibida', color: '#ef4444' },
+    danger:     { label: 'Zona de peligro (D)',     color: '#f97316' },
+    military:   { label: 'Militar / ejercicios',    color: '#b91c1c' },
+    uas:        { label: 'UAS / drones',            color: '#ec4899' },
+    activity:   { label: 'Actividad aérea',         color: '#f59e0b' },
+    obstacle:   { label: 'Obstáculo',               color: '#a16207' },
+    navaid:     { label: 'Navegación / comms',      color: '#a855f7' },
+    airspace:   { label: 'Espacio aéreo / ATS',     color: '#14b8c4' },
+    other:      { label: 'Otros',                   color: '#94a3b8' },
+  };
+  function getForeignCategoryMeta(key) {
+    return FOREIGN_CATEGORY_META[key] || FOREIGN_CATEGORY_META.other;
+  }
+  function classifyForeignNotam(n) {
+    const q = (n && n.q_code ? String(n.q_code).toUpperCase() : '');
+    const subj = q.length >= 3 ? q.substring(1, 3) : '';   // chars 2-3
+    const s0 = subj.charAt(0);
+    const mil = !!(n && n.military);
+    let cat;
+    if (subj === 'RD') cat = 'danger';
+    else if (subj === 'RM') cat = 'military';
+    else if (s0 === 'R') cat = 'restricted';            // RA/RR/RP/RT/RO…
+    else if (subj === 'WU') cat = 'uas';
+    else if (subj === 'WM' || subj === 'WE' || subj === 'WD') cat = 'military';
+    else if (s0 === 'W') cat = 'activity';              // WA/WB/WC/WG/WL/WP…
+    else if (s0 === 'O') cat = 'obstacle';              // OB/OL
+    else if (s0 === 'N' || s0 === 'C' || s0 === 'I' || s0 === 'G') cat = 'navaid';
+    else if (s0 === 'A' || s0 === 'S' || s0 === 'P' || s0 === 'F' || s0 === 'L' || s0 === 'M') cat = 'airspace';
+    else cat = 'other';
+    // La bandera militar reclasifica las categorías genéricas a "militar".
+    if (mil && (cat === 'restricted' || cat === 'activity' || cat === 'airspace' || cat === 'other')) cat = 'military';
+    return cat;
+  }
+
   // Convierte una lista de ForeignNotamOut en objetos TSA-like dibujables
   // por mapView.render(tsas). Solo procesa items con geometria
   // (geometry_type !== 'none').
@@ -805,6 +845,8 @@ window.NotamHub.notamHub = (function () {
           raw:      n.schedule_raw || (n.is_permanent ? 'PERM' : ''),
         }],
         remarks: n.body,
+        qCode: n.q_code || '',
+        category: classifyForeignNotam(n),
         _isWorkArea: false,
         _isPermanent: !!n.is_permanent,
         _foreign: true,
@@ -833,6 +875,10 @@ window.NotamHub.notamHub = (function () {
     fetchForeignNew,
     normalizeForeignNotam,
     convertForeignToInternal,
+    classifyForeignNotam,
+    getForeignCategoryMeta,
+    FOREIGN_CATEGORY_META,
     getStoredToken, setStoredToken, clearStoredToken,
+    getStoredAdminToken, setStoredAdminToken,
   };
 })();

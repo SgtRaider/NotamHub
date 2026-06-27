@@ -92,10 +92,12 @@
       const windows = t._isPermanent
         ? '<span class="badge">Permanente</span>'
         : ((t.schedules && sf && sf.listHTML) ? sf.listHTML(t.schedules) : '');
-      const origin = t._foreign ? ('Extranjero' + (t.country ? ' · ' + esc(t.country) : '')) : 'Nacional';
+      const origin = t._foreign
+        ? ('Ext.' + (t.country ? ' ' + esc(t.country) : '') + catBadgeHTML(t))
+        : 'Nacional';
       tr.innerHTML =
         '<td class="col-check"><input type="checkbox" class="tsa-row-cb" ' + checked + '></td>' +
-        '<td>' + esc(t.name || '—') + (t._foreign ? ' <span class="badge badge-foreign">FRGN</span>' : '') + '</td>' +
+        '<td>' + esc(t.name || '—') + '</td>' +
         '<td>' + origin + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.lowerLabel) || 'GND') + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.upperLabel) || 'UNL') + '</td>' +
@@ -113,6 +115,12 @@
 
   function safeMatches(f, t) { try { return f.matches(t, state.filter); } catch (_) { return true; } }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+  function catBadgeHTML(t) {
+    const nh = notamHub();
+    const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(t.category) : null;
+    if (!meta) return '';
+    return ' <span class="cat-badge" style="background:' + meta.color + '">' + esc(meta.label) + '</span>';
+  }
 
   function updateSelectionSummary() {
     const el = $('#selection-summary');

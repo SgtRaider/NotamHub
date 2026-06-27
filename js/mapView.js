@@ -59,12 +59,28 @@ window.NotamHub.mapView = (function () {
   // color cian distintivo. Si tiene el flag _isWorkArea (NotamHub), usa
   // AREA_COLORS. Si no, fallback a la banda vertical.
   function tsaColor(tsa) {
-    if (tsa && tsa._foreign === true) return FOREIGN_COLOR;
+    if (tsa && tsa._foreign === true) {
+      const nh = window.NotamHub.notamHub;
+      const meta = nh && nh.getForeignCategoryMeta ? nh.getForeignCategoryMeta(tsa.category) : null;
+      return (meta && meta.color) || FOREIGN_COLOR;
+    }
     if (tsa && typeof tsa._isWorkArea === 'boolean') {
       return tsa._isWorkArea ? AREA_COLORS.work : AREA_COLORS.transit;
     }
     const band = geom.altitudeBand((tsa && tsa.vertical && tsa.vertical.upperFt) || 0);
     return BAND_COLORS[band];
+  }
+
+  // Área aproximada del polígono en grados² (bbox) — para ordenar el render
+  // (grandes debajo, pequeñas encima) y aligerar el relleno de áreas enormes.
+  function _approxAreaDeg(polygon) {
+    if (!polygon || !polygon.length) return 0;
+    let minLa = 90, maxLa = -90, minLo = 180, maxLo = -180;
+    for (const p of polygon) {
+      if (p[0] < minLa) minLa = p[0]; if (p[0] > maxLa) maxLa = p[0];
+      if (p[1] < minLo) minLo = p[1]; if (p[1] > maxLo) maxLo = p[1];
+    }
+    return Math.max(0, (maxLa - minLa)) * Math.max(0, (maxLo - minLo));
   }
 
   const SEA_COLOR  = '#cce4f6';
@@ -1262,6 +1278,42 @@ window.NotamHub.mapView = (function () {
     el.style.display = visible ? '' : 'none';
   }
 
+  // Reconstruye la leyenda "Áreas" según lo que hay en el mapa: TSAs
+  // nacionales (Trabajo/Tránsito) + NOTAMs extranjeros por categoría, con
+  // su color y recuento. Solo muestra lo que está presente.
+  function _renderAreasLegend(tsas) {
+    if (!legend || !legend.getContainer) return;
+    const el = legend.getContainer();
+    if (!el) return;
+    let work = 0, transit = 0, natOther = 0;
+    const foreignCats = new Map();
+    for (const t of (tsas || [])) {
+      if (t._foreign === true) {
+        const k = t.category || 'other';
+        foreignCats.set(k, (foreignCats.get(k) || 0) + 1);
+      } else if (t._isWorkArea === true) work++;
+      else if (t._isWorkArea === false) transit++;
+      else natOther++;
+    }
+    const sw = (color) => `<span class="swatch" style="background:${color}"></span>`;
+    const rows = [];
+    if (work || transit || natOther) {
+      rows.push('<div class="legend-sec">Nacional</div>');
+      if (work)    rows.push(sw(AREA_COLORS.work) + 'Trabajo (' + work + ')');
+      if (transit) rows.push(sw(AREA_COLORS.transit) + 'Tránsito (' + transit + ')');
+      if (natOther) rows.push(sw(BAND_COLORS.mid) + 'Otras (' + natOther + ')');
+    }
+    if (foreignCats.size) {
+      rows.push('<div class="legend-sec">Extranjeros</div>');
+      const nh = window.NotamHub.notamHub;
+      Array.from(foreignCats.entries()).sort((a, b) => b[1] - a[1]).forEach(([k, c]) => {
+        const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(k) : { label: k, color: FOREIGN_COLOR };
+        rows.push(sw(meta.color) + escapeHTML(meta.label) + ' (' + c + ')');
+      });
+    }
+    el.innerHTML = '<b>Leyenda</b><br>' + (rows.length ? rows.join('<br>') : '<span class="dim">sin áreas</span>');
+  }
+
   function formatSchedule(sch) {
     const fmt = d => d.toISOString().replace('T', ' ').slice(0, 16) + 'Z';
     return `${fmt(sch.startUTC)} → ${fmt(sch.endUTC)}`;
@@ -1277,6 +1329,13 @@ window.NotamHub.mapView = (function () {
   // Verde para work, rojo para transit, gris si no se conoce (TSAs sin
   // origen NotamHub/PDF parsed que no expusieron el flag).
   function buildAreaBadge(tsa) {
+    if (tsa && tsa._foreign === true) {
+      const nh = window.NotamHub.notamHub;
+      const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(tsa.category) : null;
+      const color = (meta && meta.color) || FOREIGN_COLOR;
+      const label = (meta && meta.label) || 'NOTAM';
+      return `<span class="tsa-flag" style="background:${color};color:#fff;border-color:${color}">${escapeHTML(label)}</span>`;
+    }
     if (!tsa || typeof tsa._isWorkArea !== 'boolean') {
       return `<span class="tsa-flag tsa-flag-unknown">Área TSA</span>`;
     }
@@ -1288,19 +1347,45 @@ window.NotamHub.mapView = (function () {
 
   function buildPopup(tsa) {
     const fmt = window.NotamHub.scheduleFmt;
-    const lines = fmt
-      ? fmt.listText(tsa.schedules).slice(0, 8).map(l => `• ${escapeHTML(l)}`).join('<br>')
-      : tsa.schedules.slice(0, 6).map(s => `• ${formatSchedule(s)}`).join('<br>');
-    const totalGroups = fmt ? fmt.listText(tsa.schedules).length : tsa.schedules.length;
-    const more = totalGroups > 8 ? `<br><i>…y ${totalGroups - 8} grupos más</i>` : '';
+    const isForeign = tsa._foreign === true;
+
+    // Línea de metadatos: país + Q-code (extranjeros) o formato (nacionales).
+    let metaLine;
+    if (isForeign) {
+      const parts = [];
+      if (tsa.country) parts.push(`País: <b>${escapeHTML(tsa.country)}</b>`);
+      if (tsa.qCode)   parts.push(`Q: <b>${escapeHTML(tsa.qCode)}</b>`);
+      metaLine = parts.length ? parts.join(' · ') + '<br>' : '';
+    } else {
+      metaLine = `<i>${escapeHTML(tsa.format || '')}</i><br>`;
+    }
+
+    // Vigencia: "Permanente" o las ventanas horarias.
+    let timeLine;
+    if (tsa._isPermanent) {
+      timeLine = '<b>Vigencia:</b> Permanente';
+    } else {
+      const lines = fmt
+        ? fmt.listText(tsa.schedules).slice(0, 8).map(l => `• ${escapeHTML(l)}`).join('<br>')
+        : tsa.schedules.slice(0, 6).map(s => `• ${formatSchedule(s)}`).join('<br>');
+      const totalGroups = fmt ? fmt.listText(tsa.schedules).length : tsa.schedules.length;
+      const more = totalGroups > 8 ? `<br><i>…y ${totalGroups - 8} grupos más</i>` : '';
+      timeLine = `<b>Ventanas:</b><br>${lines}${more}`;
+    }
+
+    // Cuerpo del NOTAM (extranjeros) recortado.
+    const body = (isForeign && tsa.remarks)
+      ? `<div class="tsa-popup-body">${escapeHTML(String(tsa.remarks).slice(0, 400))}</div>`
+      : '';
+
     return `
       <div class="tsa-popup-title-row">
         <b>${escapeHTML(tsa.name)}</b>${buildAreaBadge(tsa)}
       </div>
-      <i>${tsa.format}</i><br>
+      ${metaLine}
       Altitud: <b>${escapeHTML(tsa.vertical.lowerLabel)}</b> → <b>${escapeHTML(tsa.vertical.upperLabel)}</b><br>
-      Vértices: ${tsa.polygon.length}<br>
-      <b>Ventanas (${tsa.schedules.length} días):</b><br>${lines}${more}
+      ${timeLine}
+      ${body}
     `;
   }
 
@@ -1330,22 +1415,28 @@ window.NotamHub.mapView = (function () {
       _setAreasLegendVisible(false);
       return;
     }
-    // Hay TSAs en el mapa: muestra la leyenda de colores.
+    // Hay TSAs en el mapa: muestra la leyenda (dinámica por categoría).
     _setAreasLegendVisible(true);
+    _renderAreasLegend(tsas);
 
     const allLatLngs = [];
     const tsaOpacity = settingsGet('opacity.tsaFill', 0.30);
     // Snapshot del listado para el handler de click (cierra sobre tsas).
     const tsaList = tsas.slice();
-    for (const tsa of tsas) {
+    // Render: áreas grandes primero (debajo) y pequeñas después (encima),
+    // para que las zonas pequeñas no queden ocultas por FIRs enormes.
+    const ordered = tsas.slice().sort((a, b) => _approxAreaDeg(b.polygon) - _approxAreaDeg(a.polygon));
+    for (const tsa of ordered) {
       const color = tsaColor(tsa);
       const isForeign = tsa && tsa._foreign === true;
-      // NOTAMs extranjeros: trazo cian + relleno mas ligero (y dashed)
-      // para separarlos a simple vista de las TSAs nacionales.
+      const area = _approxAreaDeg(tsa.polygon);
+      // NOTAMs extranjeros: color por categoría, trazo dashed y relleno más
+      // ligero (aún más en áreas enormes, para no tapar el mapa).
+      const fill = isForeign ? (area > 3 ? 0.05 : 0.15) : tsaOpacity;
       const poly = L.polygon(tsa.polygon, {
-        color, weight: 2,
+        color, weight: isForeign && area > 3 ? 1.5 : 2,
         fillColor: color,
-        fillOpacity: isForeign ? Math.min(tsaOpacity, 0.15) : tsaOpacity,
+        fillOpacity: fill,
         dashArray: isForeign ? '5 4' : null,
         pane: 'tsaPane',
       });
