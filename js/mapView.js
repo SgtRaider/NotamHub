@@ -184,12 +184,15 @@ window.NotamHub.mapView = (function () {
 
     // Base SATÉLITE (Esri World Imagery, sin API key) + alternativa callejero
     // (OpenStreetMap). Se eligen desde el control de capas.
+    // crossOrigin: los tiles se piden con CORS (Esri y OSM responden
+    // Access-Control-Allow-Origin:*). Necesario para poder volcar el mapa a
+    // un <canvas> sin "contaminarlo" al exportar el PDF (captureForPdf).
     _baseSat = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      { maxZoom: 19, attribution: 'Imagery © Esri · Maxar · Earthstar Geographics' });
+      { maxZoom: 19, crossOrigin: 'anonymous', attribution: 'Imagery © Esri · Maxar · Earthstar Geographics' });
     _baseStreet = L.tileLayer(
       'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
+      { maxZoom: 19, crossOrigin: 'anonymous', attribution: '© OpenStreetMap contributors' });
     _baseSat.addTo(map);
 
     // Etiquetas de ciudades para orientación (la base offline de países y la
@@ -1624,6 +1627,220 @@ window.NotamHub.mapView = (function () {
     }
   }
 
+  // ── Exportación: volcado del mapa satélite a imagen (para el PDF) ──────
+  // Construye un mapa Leaflet OFFSCREEN del tamaño deseado, encuadra los
+  // items, espera a que carguen los tiles y los vuelca (junto a los
+  // polígonos NOTAM + etiquetas con su nombre) a un <canvas>, devolviendo
+  // un dataURL JPEG. No toca el mapa visible del usuario.
+  function _sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  async function _waitTiles(host, timeoutMs) {
+    const start = (window.performance && performance.now) ? performance.now() : 0;
+    const elapsed = () => ((window.performance && performance.now) ? performance.now() : timeoutMs) - start;
+    while (elapsed() < timeoutMs) {
+      const imgs = host.querySelectorAll('img.leaflet-tile');
+      if (imgs.length) {
+        let allDone = true;
+        imgs.forEach((im) => { if (!(im.complete && im.naturalWidth > 0)) allDone = false; });
+        if (allDone) { await _sleep(220); return; }
+      }
+      await _sleep(150);
+    }
+  }
+
+  function _hexToRgba(hex, a) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+    if (!m) return 'rgba(6,182,212,' + a + ')';
+    return 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + a + ')';
+  }
+
+  // Centroide (ponderado por área) de un anillo [[lat,lon],…]; cae al
+  // promedio de vértices si el área es ~0.
+  function _ringCentroid(ring) {
+    let a = 0, cx = 0, cy = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][1], yi = ring[i][0], xj = ring[j][1], yj = ring[j][0];
+      const f = xi * yj - xj * yi; a += f; cx += (xi + xj) * f; cy += (yi + yj) * f;
+    }
+    if (Math.abs(a) < 1e-9) {
+      let sx = 0, sy = 0; ring.forEach((p) => { sx += p[1]; sy += p[0]; });
+      return [sy / ring.length, sx / ring.length];
+    }
+    a *= 0.5;
+    return [cy / (6 * a), cx / (6 * a)];  // [lat, lon]
+  }
+
+  function _largestRing(rings) {
+    let best = null, bestA = -1;
+    for (const r of rings) { const A = _approxAreaDeg(r); if (A > bestA) { bestA = A; best = r; } }
+    return best;
+  }
+
+  function _roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function _drawBordersToCanvas(ctx, m) {
+    const geo = window.NotamHub.offlineGeo;
+    if (!geo || !geo.countries || !geo.countries.features) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    ctx.lineWidth = 1;
+    const drawRing = (ring) => {
+      ctx.beginPath();
+      for (let i = 0; i < ring.length; i++) {
+        const q = m.latLngToContainerPoint([ring[i][1], ring[i][0]]);  // geojson = [lon,lat]
+        if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+      }
+      ctx.stroke();
+    };
+    for (const f of geo.countries.features) {
+      const g = f && f.geometry; if (!g) continue;
+      if (g.type === 'Polygon') g.coordinates.forEach(drawRing);
+      else if (g.type === 'MultiPolygon') g.coordinates.forEach((poly) => poly.forEach(drawRing));
+    }
+    ctx.restore();
+  }
+
+  // Dibuja una etiqueta (TAG) con el nombre encima de cada NOTAM, con
+  // anti-solape voraz (empuja hacia abajo si choca con otra ya colocada).
+  function _drawLabels(ctx, m, items, W, H) {
+    ctx.save();
+    ctx.font = '600 14px system-ui, "Segoe UI", Arial, sans-serif';
+    ctx.textBaseline = 'middle';
+    const placed = [];
+    const overlaps = (r) => placed.some((p) =>
+      !(r.x + r.w < p.x || r.x > p.x + p.w || r.y + r.h < p.y || r.y > p.y + p.h));
+    // Áreas grandes primero (etiqueta cerca de su centro antes de que las
+    // pequeñas ocupen el espacio).
+    const withRings = (items || []).filter((t) => _ringsOf(t).length)
+      .sort((a, b) => _approxAreaDeg(_largestRing(_ringsOf(b)) || []) - _approxAreaDeg(_largestRing(_ringsOf(a)) || []));
+    for (const t of withRings) {
+      const ring = _largestRing(_ringsOf(t));
+      if (!ring || ring.length < 3) continue;
+      const c = _ringCentroid(ring);
+      const pc = m.latLngToContainerPoint([c[0], c[1]]);
+      const x = pc.x, y = pc.y;
+      if (x < -60 || x > W + 60 || y < -60 || y > H + 60) continue;
+      const label = String(t.name || t.id || '').trim();
+      if (!label) continue;
+      const color = tsaColor(t);
+      const padX = 5, bh = 20;
+      const tw = ctx.measureText(label).width;
+      const bw = tw + padX * 2;
+      const rect = {
+        x: Math.min(Math.max(2, x - bw / 2), W - bw - 2),
+        y: Math.min(Math.max(2, y - bh / 2), H - bh - 2),
+        w: bw, h: bh,
+      };
+      let tries = 0;
+      while (overlaps(rect) && tries < 60) {
+        rect.y += bh + 2;
+        if (rect.y > H - bh - 2) { rect.y = 2; rect.x = Math.min(rect.x + bw * 0.55, W - bw - 2); }
+        tries++;
+      }
+      placed.push({ x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+      // Línea guía centroide -> etiqueta.
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(rect.x + bw / 2, rect.y + bh / 2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1; ctx.stroke();
+      // Punto en el centroide.
+      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = color; ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2; ctx.stroke();
+      // Caja.
+      _roundRect(ctx, rect.x, rect.y, bw, bh, 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.93)'; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = color;
+      _roundRect(ctx, rect.x, rect.y, bw, bh, 4); ctx.stroke();
+      // Texto.
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText(label, rect.x + padX, rect.y + bh / 2 + 0.5);
+    }
+    ctx.restore();
+  }
+
+  // Captura el mapa satélite (con polígonos NOTAM + etiquetas) a un dataURL.
+  // items: lista de NOTAMs/TSAs a encuadrar y etiquetar. Devuelve
+  // { dataUrl, width, height } o { dataUrl:null } si falla.
+  async function captureForPdf(items, opts) {
+    opts = opts || {};
+    const W = opts.width || 1240, H = opts.height || 900;
+    const useStreet = !!(map && _baseStreet && map.hasLayer(_baseStreet));
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-100000px;top:0;width:' + W + 'px;height:' + H +
+      'px;background:' + SEA_COLOR + ';';
+    document.body.appendChild(host);
+    let m = null, dataUrl = null;
+    try {
+      m = L.map(host, {
+        zoomControl: false, attributionControl: false,
+        fadeAnimation: false, zoomAnimation: false,
+        markerZoomAnimation: false, preferCanvas: false,
+      });
+      const url = useStreet
+        ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+        : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      L.tileLayer(url, { crossOrigin: 'anonymous', maxZoom: 19 }).addTo(m);
+
+      const pts = [];
+      (items || []).forEach((t) => { _ringsOf(t).forEach((r) => { if (r) r.forEach((p) => pts.push(p)); }); });
+      if (pts.length) {
+        try { m.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: opts.maxZoom || 11 }); }
+        catch (_) { m.setView([40, -4], 5); }
+      } else {
+        m.fitBounds(DEFAULT_BOUNDS);
+      }
+      await _waitTiles(host, 9000);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = SEA_COLOR; ctx.fillRect(0, 0, W, H);
+      // Tiles ya renderizados en el DOM offscreen -> al canvas (posición vía
+      // getBoundingClientRect relativa al host, robusta ante transforms).
+      const hostRect = host.getBoundingClientRect();
+      host.querySelectorAll('img.leaflet-tile').forEach((im) => {
+        if (!(im.complete && im.naturalWidth > 0)) return;
+        const r = im.getBoundingClientRect();
+        try {
+          ctx.drawImage(im, Math.round(r.left - hostRect.left), Math.round(r.top - hostRect.top),
+            Math.ceil(r.width), Math.ceil(r.height));
+        } catch (_) { /* tile contaminado: se omite */ }
+      });
+      _drawBordersToCanvas(ctx, m);
+      // Polígonos NOTAM (cada parte por separado).
+      for (const t of (items || [])) {
+        const rings = _ringsOf(t); if (!rings.length) continue;
+        const color = tsaColor(t);
+        ctx.lineWidth = 2; ctx.strokeStyle = color; ctx.fillStyle = _hexToRgba(color, 0.25);
+        for (const ring of rings) {
+          if (!ring || ring.length < 3) continue;
+          ctx.beginPath();
+          ring.forEach((p, i) => {
+            const q = m.latLngToContainerPoint([p[0], p[1]]);
+            if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+          });
+          ctx.closePath(); ctx.fill(); ctx.stroke();
+        }
+      }
+      _drawLabels(ctx, m, items, W, H);
+      try { dataUrl = canvas.toDataURL('image/jpeg', 0.92); }
+      catch (e) { console.warn('[mapView] toDataURL falló (canvas contaminado?):', e); dataUrl = null; }
+    } catch (e) {
+      console.warn('[mapView] captureForPdf falló:', e);
+    } finally {
+      try { if (m) m.remove(); } catch (_) {}
+      try { host.remove(); } catch (_) {}
+    }
+    return { dataUrl: dataUrl, width: W, height: H };
+  }
+
   function pointInPoly(pt, poly) {
     let inside = false;
     const x = pt[1], y = pt[0];
@@ -1640,6 +1857,7 @@ window.NotamHub.mapView = (function () {
   return {
     init, render, fitBounds, invalidateSize, fitToDefault,
     setWeatherMarkers, clearWeatherMarkers,
+    captureForPdf,
     applyOpacities,
     setLegendVisible, updateLegend, isLegendVisible,
     setLayersControlVisible, isLayersControlVisible,

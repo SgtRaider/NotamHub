@@ -210,6 +210,7 @@
             <span id="selection-summary" class="chip"></span>
             <button id="btn-select-all" class="btn btn-ghost" type="button">Todas</button>
             <button id="btn-select-none" class="btn btn-ghost" type="button">Ninguna</button>
+            <button id="btn-export-pdf" class="btn btn-primary" type="button" title="Genera un PDF con los NOTAMs seleccionados (mapa + decode + texto)">📄 Generar PDF</button>
           </div>
         </div>
         <p class="hint">Marca cada área para incluirla en el mapa. Las filas atenuadas están fuera del filtro de fecha/hora.</p>
@@ -332,6 +333,8 @@
 <script src="js/notamHub.js"></script>
 <script src="js/notamDecode.js"></script>
 <script src="js/mapView.js"></script>
+<script src="https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="js/pdfExport.js"></script>
 <script src="js/app.js"></script>
 <script src="js/shell.js"></script>
 

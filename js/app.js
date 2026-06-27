@@ -76,6 +76,45 @@
     });
   }
 
+  // Texto del filtro FIR/categoría activo (para la cabecera del PDF).
+  function firFilterLabel() {
+    if (!state.firFilter) return 'Todos';
+    return Array.from(state.firFilter).map((f) => (f === 'ES' ? 'Nacional' : f)).join(', ');
+  }
+  function catFilterLabel() {
+    if (!state.catFilter) return 'Todos';
+    const nh = notamHub();
+    return Array.from(state.catFilter).map((k) => {
+      const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(k) : null;
+      return meta ? meta.label : k;
+    }).join(', ');
+  }
+
+  // Exporta a PDF los NOTAMs visibles (seleccionados ∩ filtros FIR/tipo).
+  async function exportPdf(btn) {
+    const pe = NH.pdfExport;
+    const statusEl = $('#notamhub-status');
+    if (!pe || !pe.generate) { setStatus(statusEl, 'Módulo de exportación no disponible.', 'err'); return; }
+    const items = getVisible();
+    if (!items.length) { setStatus(statusEl, 'No hay NOTAMs seleccionados (y dentro del filtro) para exportar.', 'err'); return; }
+    const prevTxt = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Generando…'; }
+    try {
+      await pe.generate({
+        items,
+        firLabel: firFilterLabel(),
+        catLabel: catFilterLabel(),
+        onProgress: (msg) => { if (msg) setStatus(statusEl, msg, 'info'); },
+      });
+      setStatus(statusEl, 'PDF generado con ' + items.length + ' NOTAM.', 'ok');
+    } catch (err) {
+      console.error('[app] exportar PDF falló:', err);
+      setStatus(statusEl, 'Error al generar el PDF: ' + (err && err.message || err), 'err');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prevTxt; }
+    }
+  }
+
   function renderViews() {
     const mv = mapView();
     const visible = getVisible();
@@ -384,6 +423,8 @@
     if (allBtn) allBtn.addEventListener('click', () => { selectAll(); renderAll(); });
     if (noneBtn) noneBtn.addEventListener('click', () => { selectNone(); renderAll(); });
     if (headCb) headCb.addEventListener('change', () => { headCb.checked ? selectAll() : selectNone(); renderAll(); });
+    const pdfBtn = $('#btn-export-pdf');
+    if (pdfBtn) pdfBtn.addEventListener('click', () => exportPdf(pdfBtn));
   }
 
   // ── Filtro ────────────────────────────────────────────────────────

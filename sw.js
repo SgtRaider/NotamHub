@@ -9,7 +9,7 @@
  * Para forzar invalidación al desplegar nueva versión, sube CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'notamhub-v19';
+const CACHE_VERSION = 'notamhub-v20';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -31,11 +31,13 @@ const SHELL_ASSETS = [
   './js/notamHub.js',
   './js/notamDecode.js',
   './js/mapView.js',
+  './js/pdfExport.js',
   './js/app.js',
   './js/shell.js',
   // Librerías CDN (otro origen, pero las cacheamos para uso offline)
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  'https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js',
 ];
 
 // Hosts que deben ir siempre por red (datos en tiempo real). Sin esto la
