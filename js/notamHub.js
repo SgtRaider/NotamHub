@@ -765,7 +765,22 @@ window.NotamHub.notamHub = (function () {
         out.push(n);
       }
     }
-    console.info('[notamHub] fetchForeignAll: ' + firs.length + ' FIRs -> ' + out.length + ' NOTAMs (dedup)');
+    const firCount = out.length;
+    // /foreign/fir solo devuelve lo VIGENTE al instante. /foreign/new trae los
+    // recién detectados, incluidos NOTAMs FUTUROS (ventana aún no iniciada) que
+    // por eso no salen en /fir "ahora". Los fusionamos para no dejarlos fuera.
+    try {
+      const recent = await fetchForeignNew({ hours: 720 });
+      if (Array.isArray(recent)) {
+        for (const n of recent) {
+          if (!n || !n.notam_number || seen.has(n.notam_number)) continue;
+          seen.add(n.notam_number);
+          out.push(n);
+        }
+      }
+    } catch (e) { console.warn('[notamHub] foreign/new falló:', e && e.message); }
+    console.info('[notamHub] fetchForeignAll: ' + firs.length + ' FIRs -> ' + firCount +
+      ' vigentes + ' + (out.length - firCount) + ' de /new (futuros/recientes) = ' + out.length);
     return out;
   }
 
@@ -808,6 +823,8 @@ window.NotamHub.notamHub = (function () {
     const d = new Date(s);
     return isNaN(d.getTime()) ? (fallback || null) : d;
   }
+  function _isUpcoming(vf) { return vf instanceof Date && vf.getTime() > Date.now(); }
+  function _isExpired(vt)  { return vt instanceof Date && vt.getTime() < Date.now(); }
 
   // Normaliza un ForeignNotamOut al shape de UI alineado con normalizeNotam.
   function normalizeForeignNotam(n) {
@@ -968,6 +985,8 @@ window.NotamHub.notamHub = (function () {
         _noGeometry: !hasGeom,
         _firWide: firWide,
         _largeCircle: hasGeom && isLargeCircle,
+        _upcoming: _isUpcoming(_toUTCDate(n.valid_from)),
+        _expired: _isExpired(_toUTCDate(n.valid_to)),
         _foreign: true,
         country: n.country,
       });
@@ -1120,6 +1139,8 @@ window.NotamHub.notamHub = (function () {
         _noGeometry: !hasGeom,
         _firWide: firWide,
         _largeCircle: hasGeom && isCircle && radiusNm != null && radiusNm > 75 && radiusNm < FIRWIDE_NM,
+        _upcoming: _isUpcoming(validFrom),
+        _expired: _isExpired(validTo),
         _foreign: false,
         _national: true,
         country: 'ES',

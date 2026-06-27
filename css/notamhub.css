@@ -396,6 +396,18 @@
   border: 1px solid var(--nh-accent-bd); border-radius: var(--r-pill);
   padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
 }
+.badge-upcoming {
+  display: inline-block;
+  background: rgba(245,158,11,.2); color: var(--warn);
+  border: 1px solid rgba(245,158,11,.5); border-radius: var(--r-pill);
+  padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
+}
+.badge-expired {
+  display: inline-block;
+  background: rgba(100,116,139,.2); color: var(--text-mute);
+  border: 1px solid rgba(100,116,139,.45); border-radius: var(--r-pill);
+  padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
+}
 
 /* ════════════════════════════════════════════════════════════════
    6. Ordenación por columnas + buscador + chips de categoría

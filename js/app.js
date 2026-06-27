@@ -126,12 +126,15 @@
         : (t._noGeometry
           ? ' <span class="badge badge-nogeo" title="Sin geometría: el API no da coordenadas dibujables">sin geo</span>'
           : '');
+      const timeNote = t._upcoming
+        ? ' <span class="badge badge-upcoming" title="Aún no vigente: su ventana empieza en el futuro">Próximo</span>'
+        : (t._expired ? ' <span class="badge badge-expired" title="Su validez ya terminó">Expirado</span>' : '');
       const origin = t._foreign
         ? (esc(t.fir || t.country || 'Ext.') + catBadgeHTML(t))
         : 'Nacional';
       tr.innerHTML =
         '<td class="col-check"><input type="checkbox" class="tsa-row-cb" ' + checked + '></td>' +
-        '<td class="col-name"><span class="row-caret">▸</span>' + esc(t.name || '—') + lcNote + geomNote + '</td>' +
+        '<td class="col-name"><span class="row-caret">▸</span>' + esc(t.name || '—') + lcNote + geomNote + timeNote + '</td>' +
         '<td>' + origin + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.lowerLabel) || 'GND') + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.upperLabel) || 'UNL') + '</td>' +
@@ -316,7 +319,7 @@
       assignUids();
       // Selecciona los extranjeros plotteables (con geometría y radio ≤ 75 NM).
       // Los grandes (>75 NM) o sin geometría quedan deseleccionados.
-      state.foreign.forEach((t) => { if (!t._largeCircle && !t._noGeometry) state.selected.add(t._uid); });
+      state.foreign.forEach((t) => { if (!t._largeCircle && !t._noGeometry && !t._expired) state.selected.add(t._uid); });
       rebuildFirFilter();
       rebuildCatFilter();
       if (rerender) renderAll();
@@ -346,7 +349,7 @@
   function selectNone() { state.selected = new Set(); }
   // Selección por defecto al cargar: todo MENOS los círculos > 75 NM y los que
   // no tienen geometría (no plotteables). Quedan accesibles/visibles en la tabla.
-  function selectDefault() { state.selected = new Set(allItems().filter((t) => !t._largeCircle && !t._noGeometry).map((t) => t._uid)); }
+  function selectDefault() { state.selected = new Set(allItems().filter((t) => !t._largeCircle && !t._noGeometry && !t._expired).map((t) => t._uid)); }
 
   function wireSelection() {
     const tbody = $('#tsa-table tbody');
