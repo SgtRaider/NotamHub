@@ -93,7 +93,11 @@
     tbody.innerHTML = '';
     const sf = scheduleFmt();
     const f = filters();
+    let shown = 0;
     items.forEach((t) => {
+      // El filtro por FIR oculta las filas (no solo las atenúa).
+      if (state.firFilter && !state.firFilter.has(firOf(t))) return;
+      shown++;
       const tr = document.createElement('tr');
       tr.dataset.uid = t._uid;
       tr.className = 'tsa-row';
@@ -138,7 +142,10 @@
       wrap.classList.toggle('hidden', items.length === 0);
     }
     const countBadge = $('#tsa-count');
-    if (countBadge) countBadge.textContent = items.length ? String(items.length) : '';
+    if (countBadge) {
+      countBadge.textContent = !items.length ? ''
+        : (state.firFilter && shown < items.length ? (shown + ' / ' + items.length) : String(items.length));
+    }
     updateSelectionSummary();
   }
 
@@ -345,19 +352,27 @@
         renderAll(); updateFilterSummary();
       });
     });
-    // Filtro por FIR (chips dinámicos, delegación de eventos).
+    // Filtro por FIR (chips dinámicos, delegación de eventos). Modelo "aislar":
+    //  - "Todos" -> muestra todos los FIR (firFilter = null).
+    //  - pulsar un FIR estando en "todos" -> aísla SOLO ese FIR.
+    //  - pulsar más FIRs -> los añade al conjunto visible.
+    //  - re-pulsar un FIR activo -> lo quita (si queda vacío, vuelve a todos).
     const firHost = $('#fir-filter-chips');
     if (firHost) firHost.addEventListener('click', (e) => {
       const chip = e.target.closest && e.target.closest('.fir-chip');
       if (!chip) return;
+      if (chip.dataset.firAll) { state.firFilter = null; rebuildFirFilter(); renderAll(); return; }
       const fir = chip.dataset.fir;
-      if (!state.firFilter) {
-        // Primer toggle: parte de "todos activos" y quita el pulsado.
-        state.firFilter = new Set($$('#fir-filter-chips .fir-chip').map((c) => c.dataset.fir));
+      if (!fir) return;
+      if (state.firFilter === null) {
+        state.firFilter = new Set([fir]);                       // aísla el pulsado
+      } else if (state.firFilter.has(fir)) {
+        state.firFilter.delete(fir);
+        if (state.firFilter.size === 0) state.firFilter = null; // vacío -> todos
+      } else {
+        state.firFilter.add(fir);                               // añade al conjunto
       }
-      if (state.firFilter.has(fir)) state.firFilter.delete(fir); else state.firFilter.add(fir);
-      chip.classList.toggle('is-active', state.firFilter.has(fir));
-      renderAll();
+      rebuildFirFilter(); renderAll();
     });
   }
 
@@ -382,6 +397,13 @@
     lbl.className = 'fir-chips-label';
     lbl.textContent = 'FIR:';
     host.appendChild(lbl);
+    // Chip "Todos" (muestra todos los FIR).
+    const allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'fir-chip fir-chip-all' + (!state.firFilter ? ' is-active' : '');
+    allChip.dataset.firAll = '1';
+    allChip.textContent = 'Todos';
+    host.appendChild(allChip);
     firs.forEach((fir) => {
       const on = !state.firFilter || state.firFilter.has(fir);
       const btn = document.createElement('button');

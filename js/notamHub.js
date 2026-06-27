@@ -888,11 +888,12 @@ window.NotamHub.notamHub = (function () {
 
       const radiusNm = Number.isFinite(n.radius_nm) ? n.radius_nm : null;
       const effR = hasGeom ? _polyEffRadiusNm(polygon) : null;
-      // "Grande": radio declarado > 75 NM (de CUALQUIER geometry_type) o radio
-      // efectivo del polígono > 75 NM.
-      const isLarge = (radiusNm != null && radiusNm > 75) || (effR != null && effR > 75);
+      // SOLO se ocultan CÍRCULOS reales (geometry_type === 'circle') con radio
+      // > 75 NM. Los polígonos NO se ocultan aunque su radio efectivo sea
+      // grande (un polígono no es un círculo).
+      const isLargeCircle = (n.geometry_type === 'circle') && radiusNm != null && radiusNm > 75;
       if (hasGeom) withGeom++; else noGeom++;
-      if (hasGeom && isLarge) large++;
+      if (hasGeom && isLargeCircle) large++;
 
       out.push({
         id: 'FN_' + (n.notam_number || ('idx' + out.length)),
@@ -931,7 +932,7 @@ window.NotamHub.notamHub = (function () {
         _circleRadiusNm: radiusNm,
         _effRadiusNm: effR != null ? Math.round(effR) : null,
         _noGeometry: !hasGeom,
-        _largeCircle: hasGeom && isLarge,
+        _largeCircle: hasGeom && isLargeCircle,
         _foreign: true,
         country: n.country,
       });
