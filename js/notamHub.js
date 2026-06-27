@@ -732,20 +732,30 @@ window.NotamHub.notamHub = (function () {
   const SUPPORTED_FIRS_FALLBACK = ['LPPC', 'LFBB', 'LFMM', 'DAAA', 'GMMM', 'LPPO', 'GVSC', 'GOOO'];
   async function fetchForeignAll(opts) {
     opts = opts || {};
-    let firs = [];
+    let firs = [], counts = {};
     try {
       const meta = await fetchForeignFirs();
       if (meta && Array.isArray(meta.supported)) firs = meta.supported.slice();
+      if (meta && meta.counts) counts = meta.counts;
     } catch (_) {}
     if (!firs.length) firs = SUPPORTED_FIRS_FALLBACK.slice();
     const fetchOpts = {};
     if (opts.at != null && opts.at !== '') fetchOpts.at = opts.at;   // sin limit a propósito
-    const lists = await Promise.all(firs.map((f) =>
-      fetchForeignByFIR(f, fetchOpts).catch((e) => {
-        console.warn('[notamHub] foreign/fir ' + f + ' falló:', e && e.message);
-        return [];
-      })
-    ));
+    // El endpoint /foreign/fir FLUCTÚA: a veces devuelve 200 con lista vacía
+    // (fallo transitorio de BBDD en el backend). Si un FIR viene vacío PERO el
+    // catálogo /firs dice que tiene NOTAMs, reintentamos (hasta 3 intentos) en
+    // vez de perderlos silenciosamente.
+    const lists = await Promise.all(firs.map(async (f) => {
+      let r = [];
+      for (let i = 0; i < 3; i++) {
+        try { r = await fetchForeignByFIR(f, fetchOpts); } catch (e) { r = null; }
+        r = Array.isArray(r) ? r : [];
+        if (r.length > 0 || !(counts[f] > 0)) return r;   // ok o catálogo vacío
+        console.warn('[notamHub] foreign/fir ' + f + ' vacío (catálogo=' + counts[f] + '), reintento ' + (i + 1) + '/2');
+        await new Promise((res) => setTimeout(res, 500 * (i + 1)));
+      }
+      return r;
+    }));
     const seen = new Set();
     const out = [];
     for (const list of lists) {
@@ -1038,12 +1048,19 @@ window.NotamHub.notamHub = (function () {
   async function fetchNationalNotams(opts) {
     opts = opts || {};
     const at = opts.at != null && opts.at !== '' ? opts.at : undefined;
-    const lists = await Promise.all(NATIONAL_FIRS.map((f) =>
-      fetchNotamsByFIR(f, { at: at }).catch((e) => {
-        console.warn('[notamHub] notams/fir ' + f + ' falló:', e && e.message);
-        return [];
-      })
-    ));
+    // Reintento ante respuesta vacía transitoria (el backend a veces falla el
+    // acceso a BBDD y devuelve []): LECM/LECB/GCCC siempre tienen NOTAMs, así
+    // que un 0 casi seguro es transitorio -> reintentamos hasta 3 veces.
+    const lists = await Promise.all(NATIONAL_FIRS.map(async (f) => {
+      let r = [];
+      for (let i = 0; i < 3; i++) {
+        try { r = await fetchNotamsByFIR(f, { at: at }); } catch (e) { r = null; }
+        r = Array.isArray(r) ? r : [];
+        if (r.length > 0) return r;
+        if (i < 2) { console.warn('[notamHub] notams/fir ' + f + ' vacío, reintento ' + (i + 1) + '/2'); await new Promise((res) => setTimeout(res, 500 * (i + 1))); }
+      }
+      return r;
+    }));
     const seen = new Set();
     const out = [];
     for (const list of lists) {
