@@ -725,6 +725,58 @@ window.NotamHub.notamHub = (function () {
     return _fetchJSON('/notams/foreign/new', qs);
   }
 
+  // Carga TODOS los NOTAMs extranjeros recorriendo cada FIR soportada. Es
+  // más completo que /foreign/bbox (que se deja los que están fuera del bbox
+  // o no tienen geometría). NOTA: NO pasamos `limit` — el endpoint /fir
+  // devuelve [] con limit alto (bug del backend); sin limit devuelve todos.
+  const SUPPORTED_FIRS_FALLBACK = ['LPPC', 'LFBB', 'LFMM', 'DAAA', 'GMMM', 'LPPO', 'GVSC', 'GOOO'];
+  async function fetchForeignAll(opts) {
+    opts = opts || {};
+    let firs = [];
+    try {
+      const meta = await fetchForeignFirs();
+      if (meta && Array.isArray(meta.supported)) firs = meta.supported.slice();
+    } catch (_) {}
+    if (!firs.length) firs = SUPPORTED_FIRS_FALLBACK.slice();
+    const fetchOpts = {};
+    if (opts.at != null && opts.at !== '') fetchOpts.at = opts.at;   // sin limit a propósito
+    const lists = await Promise.all(firs.map((f) =>
+      fetchForeignByFIR(f, fetchOpts).catch((e) => {
+        console.warn('[notamHub] foreign/fir ' + f + ' falló:', e && e.message);
+        return [];
+      })
+    ));
+    const seen = new Set();
+    const out = [];
+    for (const list of lists) {
+      for (const n of (list || [])) {
+        if (!n || !n.notam_number || seen.has(n.notam_number)) continue;
+        seen.add(n.notam_number);
+        out.push(n);
+      }
+    }
+    console.info('[notamHub] fetchForeignAll: ' + firs.length + ' FIRs -> ' + out.length + ' NOTAMs (dedup)');
+    return out;
+  }
+
+  // Radio efectivo (NM) de un polígono = distancia máx. del centroide a un
+  // vértice. 1° lat = 60 NM. Sirve para detectar áreas grandes aunque el
+  // geometry_type no sea 'circle'.
+  function _polyEffRadiusNm(polygon) {
+    if (!polygon || polygon.length < 3) return null;
+    const c = polygonCentroid(polygon);
+    if (!c) return null;
+    const cosLat = Math.cos(c[0] * Math.PI / 180);
+    let maxNm = 0;
+    for (const p of polygon) {
+      const dLatNm = (p[0] - c[0]) * 60;
+      const dLonNm = (p[1] - c[1]) * 60 * cosLat;
+      const nm = Math.sqrt(dLatNm * dLatNm + dLonNm * dLonNm);
+      if (nm > maxNm) maxNm = nm;
+    }
+    return maxNm;
+  }
+
   // Convierte fecha ISO/datetime a ISO string normalizado (o null).
   function _toDate(v) {
     if (!v) return null;
@@ -807,48 +859,47 @@ window.NotamHub.notamHub = (function () {
     return cat;
   }
 
-  // Convierte una lista de ForeignNotamOut en objetos TSA-like dibujables
-  // por mapView.render(tsas). Solo procesa items con geometria
-  // (geometry_type !== 'none').
+  // Convierte una lista de ForeignNotamOut en objetos internos. Incluye TODOS
+  // (también los que no tienen geometría dibujable: se listan en la tabla con
+  // _noGeometry, pero no se plotean). Los de radio > 75 NM se marcan
+  // _largeCircle (ocultos del mapa por defecto).
   function convertForeignToInternal(apiList, atDate) {
     if (!Array.isArray(apiList)) {
       console.warn('[notamHub] convertForeign recibido NO-array:', apiList);
       return [];
     }
     const out = [];
-    let skippedNoGeom = 0, skippedBadPoly = 0;
+    let withGeom = 0, noGeom = 0, large = 0;
     for (const n of apiList) {
-      if (!n || n.geometry_type === 'none' || !n.geometry_type) { skippedNoGeom++; continue; }
+      if (!n) continue;
 
-      // Geometria: GeoJSON Polygon/MultiPolygon, o circulo
-      // (center_lat/center_lon/radius_nm).
+      // Geometría dibujable: Polygon/MultiPolygon, o círculo (solo si
+      // geometry_type==='circle' con centro+radio). 'none'/'point'/'line' NO
+      // producen área dibujable -> se listan sin plotear.
       let polygon = null;
       if (n.geometry && (n.geometry.type === 'Polygon' || n.geometry.type === 'MultiPolygon')) {
         polygon = geojsonToLatLngArray(n.geometry);
       }
-      if ((!polygon || polygon.length < 3) &&
-          Number.isFinite(n.center_lat) &&
-          Number.isFinite(n.center_lon) &&
-          Number.isFinite(n.radius_nm)) {
+      if ((!polygon || polygon.length < 3) && n.geometry_type === 'circle' &&
+          Number.isFinite(n.center_lat) && Number.isFinite(n.center_lon) && Number.isFinite(n.radius_nm)) {
         polygon = circleToPolygon(n.center_lat, n.center_lon, n.radius_nm);
       }
-      if (!polygon || polygon.length < 3) {
-        skippedBadPoly++;
-        if (skippedBadPoly <= 3) {
-          console.warn('[notamHub] foreign NOTAM sin poligono parseable:',
-            n.notam_number, 'geometry_type:', n.geometry_type);
-        }
-        continue;
-      }
+      const hasGeom = !!(polygon && polygon.length >= 3);
 
       const radiusNm = Number.isFinite(n.radius_nm) ? n.radius_nm : null;
-      const isCircle = n.geometry_type === 'circle';
+      const effR = hasGeom ? _polyEffRadiusNm(polygon) : null;
+      // "Grande": radio declarado > 75 NM (de CUALQUIER geometry_type) o radio
+      // efectivo del polígono > 75 NM.
+      const isLarge = (radiusNm != null && radiusNm > 75) || (effR != null && effR > 75);
+      if (hasGeom) withGeom++; else noGeom++;
+      if (hasGeom && isLarge) large++;
+
       out.push({
-        id: 'FN_' + (n.notam_number || out.length),
+        id: 'FN_' + (n.notam_number || ('idx' + out.length)),
         name: (n.notam_number || '') + ' ' + (n.country || ''),
         format: 'NOTAM',
-        polygon,
-        centroid: polygonCentroid(polygon),
+        polygon: hasGeom ? polygon : null,
+        centroid: hasGeom ? polygonCentroid(polygon) : null,
         vertical: {
           lowerFt: n.fl_lower != null ? n.fl_lower * 100 : 0,
           upperFt: n.fl_upper != null ? n.fl_upper * 100 : 99999,
@@ -871,20 +922,23 @@ window.NotamHub.notamHub = (function () {
         purpose:   n.purpose || '',
         fir:       n.fir || '',
         airport:   n.airport_name || '',
+        geometryType: n.geometry_type || 'none',
         _isWorkArea: false,
         _isPermanent: !!n.is_permanent,
         _isEstimate: !!n.is_estimate,
         _military: !!n.military,
-        _isCircle: isCircle,
+        _isCircle: n.geometry_type === 'circle',
         _circleRadiusNm: radiusNm,
-        _largeCircle: isCircle && radiusNm != null && radiusNm > 75,
+        _effRadiusNm: effR != null ? Math.round(effR) : null,
+        _noGeometry: !hasGeom,
+        _largeCircle: hasGeom && isLarge,
         _foreign: true,
         country: n.country,
       });
     }
     console.info('[notamHub] convertForeign: ' + apiList.length + ' entrada(s) -> ' +
-      out.length + ' TSAs · ' + skippedNoGeom + ' sin geometria · ' +
-      skippedBadPoly + ' con poligono no parseable');
+      out.length + ' items (' + withGeom + ' con geometría · ' + large + ' grandes >75NM ocultas · ' +
+      noGeom + ' sin geometría)');
     return out;
   }
 
@@ -902,6 +956,7 @@ window.NotamHub.notamHub = (function () {
     fetchForeignByFIR,
     fetchForeignByBbox,
     fetchForeignNew,
+    fetchForeignAll,
     normalizeForeignNotam,
     convertForeignToInternal,
     classifyForeignNotam,

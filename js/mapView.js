@@ -1426,6 +1426,7 @@ window.NotamHub.mapView = (function () {
     // para que las zonas pequeñas no queden ocultas por FIRs enormes.
     const ordered = tsas.slice().sort((a, b) => _approxAreaDeg(b.polygon) - _approxAreaDeg(a.polygon));
     for (const tsa of ordered) {
+      if (!tsa.polygon || tsa.polygon.length < 3) continue;   // sin geometría dibujable
       const color = tsaColor(tsa);
       const isForeign = tsa && tsa._foreign === true;
       const area = _approxAreaDeg(tsa.polygon);

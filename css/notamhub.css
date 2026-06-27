@@ -356,3 +356,36 @@
   max-height: 240px;
   overflow: auto;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   5. Filtro por FIR + filas sin geometría
+   ════════════════════════════════════════════════════════════════ */
+.fir-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0; }
+.fir-chips.hidden { display: none; }
+.fir-chips-label {
+  font-size: 11px; font-weight: 700; color: var(--text-mute);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-right: 2px;
+}
+.fir-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: var(--r-pill);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  color: var(--text-mute); transition: background-color .12s, border-color .12s, color .12s, opacity .12s;
+}
+.fir-chip:hover { border-color: var(--nh-accent-bd); color: var(--text); }
+.fir-chip.is-active { background: var(--nh-accent-soft); border-color: var(--nh-accent-bd); color: #fff; }
+.fir-chip:not(.is-active) { opacity: 0.55; }
+.fir-chip-count {
+  font-size: 9px; font-weight: 700; background: rgba(0,0,0,.25);
+  border-radius: var(--r-pill); padding: 0 5px; min-width: 16px; text-align: center;
+}
+
+.tsa-row.is-nogeo > td { opacity: 0.5; }
+.tsa-row.is-nogeo.expanded > td { opacity: 1; }
+.badge-nogeo {
+  display: inline-block;
+  background: rgba(100,116,139,.2); color: var(--text-mute);
+  border: 1px solid rgba(100,116,139,.45); border-radius: var(--r-pill);
+  padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
+}

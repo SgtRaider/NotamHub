@@ -29,10 +29,13 @@
     foreign:  [],     // NOTAMs extranjeros con geometría (convertForeignToInternal)
     selected: new Set(),
     filter: { dateFrom: '', dateTo: '', timeFrom: '', timeTo: '', tsaType: 'all', activeNow: false },
+    firFilter: null,   // null = todos los FIR; Set(...) = solo esos FIR
     mapReady: false,
     at: '',
     atTo: '',
   };
+  // FIR de un item: 'ES' para nacionales, el código FIR para extranjeros.
+  function firOf(t) { return t._foreign ? (t.fir || '—') : 'ES'; }
 
   // ── Utilidades ────────────────────────────────────────────────────
   const $  = (sel, root) => (root || document).querySelector(sel);
@@ -62,6 +65,7 @@
     const f = filters();
     return allItems().filter((t) => {
       if (!state.selected.has(t._uid)) return false;
+      if (state.firFilter && !state.firFilter.has(firOf(t))) return false;
       if (f && f.matches) { try { return f.matches(t, state.filter); } catch (_) { return true; } }
       return true;
     });
@@ -94,6 +98,7 @@
       tr.dataset.uid = t._uid;
       tr.className = 'tsa-row';
       if (t._largeCircle) tr.classList.add('is-largecircle');
+      if (t._noGeometry) tr.classList.add('is-nogeo');
       const inFilter = f && f.matches ? safeMatches(f, t) : true;
       if (!inFilter) tr.classList.add('out-of-filter');
       const checked = state.selected.has(t._uid) ? 'checked' : '';
@@ -103,15 +108,19 @@
         : (esc(fmtDate(t.validFrom)) + ' → ' + esc(fmtDate(t.validTo)));
       const nWin = (t.schedules && t.schedules.length) || 0;
       const winHint = (!t._isPermanent && nWin > 1) ? ' <span class="dim">(' + nWin + ' vent.)</span>' : '';
+      const radNm = (t._circleRadiusNm != null) ? Math.round(t._circleRadiusNm) : (t._effRadiusNm != null ? t._effRadiusNm : '?');
       const lcNote = t._largeCircle
-        ? ' <span class="badge badge-lc" title="Círculo de radio &gt; 75 NM: oculto del mapa por defecto">⊘ ' + Math.round(t._circleRadiusNm) + ' NM</span>'
+        ? ' <span class="badge badge-lc" title="Radio &gt; 75 NM: oculto del mapa por defecto">⊘ ' + radNm + ' NM</span>'
+        : '';
+      const geomNote = t._noGeometry
+        ? ' <span class="badge badge-nogeo" title="Sin geometría: el API no da coordenadas dibujables">sin geo</span>'
         : '';
       const origin = t._foreign
-        ? ('Ext.' + (t.country ? ' ' + esc(t.country) : '') + catBadgeHTML(t))
+        ? (esc(t.fir || t.country || 'Ext.') + catBadgeHTML(t))
         : 'Nacional';
       tr.innerHTML =
         '<td class="col-check"><input type="checkbox" class="tsa-row-cb" ' + checked + '></td>' +
-        '<td class="col-name"><span class="row-caret">▸</span>' + esc(t.name || '—') + lcNote + '</td>' +
+        '<td class="col-name"><span class="row-caret">▸</span>' + esc(t.name || '—') + lcNote + geomNote + '</td>' +
         '<td>' + origin + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.lowerLabel) || 'GND') + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.upperLabel) || 'UNL') + '</td>' +
@@ -235,18 +244,19 @@
 
   async function loadForeign(rerender) {
     const nh = notamHub();
-    if (!nh || !nh.fetchForeignByBbox) return;
+    if (!nh || !nh.fetchForeignAll) return;
     try {
-      const params = { limit: 5000 };
+      const params = {};
       if (state.at) params.at = state.at;
-      const apiList = await nh.fetchForeignByBbox(FOREIGN_BBOX, params);
+      const apiList = await nh.fetchForeignAll(params);
       state.foreign = nh.convertForeignToInternal ? (nh.convertForeignToInternal(apiList, state.at ? new Date(state.at) : new Date()) || []) : [];
       assignUids();
-      // Nuevos extranjeros entran seleccionados por defecto, EXCEPTO los
-      // círculos > 75 NM (quedan ocultos hasta marcarlos a mano).
-      state.foreign.forEach((t) => { if (!t._largeCircle) state.selected.add(t._uid); });
+      // Selecciona los extranjeros plotteables (con geometría y radio ≤ 75 NM).
+      // Los grandes (>75 NM) o sin geometría quedan deseleccionados.
+      state.foreign.forEach((t) => { if (!t._largeCircle && !t._noGeometry) state.selected.add(t._uid); });
+      rebuildFirFilter();
       if (rerender) renderAll();
-    } catch (err) { console.warn('[app] foreign bbox falló:', err); }
+    } catch (err) { console.warn('[app] carga foreign falló:', err); }
   }
 
   function currentBbox() {
@@ -270,9 +280,9 @@
   // ── Selección ─────────────────────────────────────────────────────
   function selectAll() { state.selected = new Set(allItems().map((t) => t._uid)); }
   function selectNone() { state.selected = new Set(); }
-  // Selección por defecto al cargar: todo MENOS los círculos > 75 NM (quedan
-  // ocultos del mapa hasta que el usuario los marque a mano en la tabla).
-  function selectDefault() { state.selected = new Set(allItems().filter((t) => !t._largeCircle).map((t) => t._uid)); }
+  // Selección por defecto al cargar: todo MENOS los círculos > 75 NM y los que
+  // no tienen geometría (no plotteables). Quedan accesibles/visibles en la tabla.
+  function selectDefault() { state.selected = new Set(allItems().filter((t) => !t._largeCircle && !t._noGeometry).map((t) => t._uid)); }
 
   function wireSelection() {
     const tbody = $('#tsa-table tbody');
@@ -334,6 +344,52 @@
         else { state.filter.tsaType = f; state.filter.activeNow = false; setChip(f); }
         renderAll(); updateFilterSummary();
       });
+    });
+    // Filtro por FIR (chips dinámicos, delegación de eventos).
+    const firHost = $('#fir-filter-chips');
+    if (firHost) firHost.addEventListener('click', (e) => {
+      const chip = e.target.closest && e.target.closest('.fir-chip');
+      if (!chip) return;
+      const fir = chip.dataset.fir;
+      if (!state.firFilter) {
+        // Primer toggle: parte de "todos activos" y quita el pulsado.
+        state.firFilter = new Set($$('#fir-filter-chips .fir-chip').map((c) => c.dataset.fir));
+      }
+      if (state.firFilter.has(fir)) state.firFilter.delete(fir); else state.firFilter.add(fir);
+      chip.classList.toggle('is-active', state.firFilter.has(fir));
+      renderAll();
+    });
+  }
+
+  // Reconstruye los chips de filtro por FIR según los datos cargados.
+  function rebuildFirFilter() {
+    const host = $('#fir-filter-chips');
+    if (!host) return;
+    const counts = new Map();
+    allItems().forEach((t) => {
+      if (t._noGeometry) return;        // los sin geometría no se plotean
+      const fir = firOf(t);
+      counts.set(fir, (counts.get(fir) || 0) + 1);
+    });
+    const firs = Array.from(counts.keys()).sort((a, b) => {
+      if (a === 'ES') return -1; if (b === 'ES') return 1;
+      return a.localeCompare(b);
+    });
+    host.innerHTML = '';
+    if (!firs.length) { host.classList.add('hidden'); return; }
+    host.classList.remove('hidden');
+    const lbl = document.createElement('span');
+    lbl.className = 'fir-chips-label';
+    lbl.textContent = 'FIR:';
+    host.appendChild(lbl);
+    firs.forEach((fir) => {
+      const on = !state.firFilter || state.firFilter.has(fir);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fir-chip' + (on ? ' is-active' : '');
+      btn.dataset.fir = fir;
+      btn.innerHTML = (fir === 'ES' ? 'Nacional' : esc(fir)) + ' <span class="fir-chip-count">' + counts.get(fir) + '</span>';
+      host.appendChild(btn);
     });
   }
   function setChip(f) {
