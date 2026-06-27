@@ -17,6 +17,12 @@
   const i18n       = () => NH.i18n;
 
   const LS_WELCOME = 'notamhub_welcome_ack';
+  // Región amplia para cargar los NOTAMs extranjeros de UNA sola vez (FIRs
+  // colindantes: Iberia + Francia S + Portugal + Marruecos + Argelia + Med).
+  // Formato API: [min_lat, max_lat, min_lon, max_lon]. Cargamos todo el área
+  // una vez (no por bbox visible) para que el mapa se mueva libre y se pinten
+  // todos los NOTAMs sin recargar al desplazar.
+  const FOREIGN_BBOX = [20, 55, -30, 25];
 
   const state = {
     national: [],     // TSAs/NOTAMs nacionales (notamHub.convertTSAsToInternal)
@@ -216,8 +222,9 @@
       else { state.foreign = []; }
       assignUids();
       selectDefault();
-      setStatus(statusEl, state.national.length + ' áreas nacionales' +
-        (state.foreign.length ? (' · ' + state.foreign.length + ' extranjeras') : '') + ' cargadas.', 'ok');
+      const hidden = allItems().filter((t) => t._largeCircle).length;
+      setStatus(statusEl, state.national.length + ' nacionales · ' + state.foreign.length + ' extranjeras cargadas' +
+        (hidden ? ' · ' + hidden + ' círculos >75 NM ocultos (visibles en la tabla)' : '') + '.', 'ok');
       renderAll();
       fitToData();
     } catch (err) {
@@ -229,12 +236,10 @@
   async function loadForeign(rerender) {
     const nh = notamHub();
     if (!nh || !nh.fetchForeignByBbox) return;
-    const bbox = currentBbox();
-    if (!bbox) return;
     try {
-      const params = {};
+      const params = { limit: 5000 };
       if (state.at) params.at = state.at;
-      const apiList = await nh.fetchForeignByBbox(bbox, params);
+      const apiList = await nh.fetchForeignByBbox(FOREIGN_BBOX, params);
       state.foreign = nh.convertForeignToInternal ? (nh.convertForeignToInternal(apiList, state.at ? new Date(state.at) : new Date()) || []) : [];
       assignUids();
       // Nuevos extranjeros entran seleccionados por defecto, EXCEPTO los
@@ -374,17 +379,9 @@
       layers.classList.toggle('is-active', on);
       layers.setAttribute('aria-pressed', String(on));
     });
-    // Recarga de NOTAMs extranjeros al mover el mapa (si está activado).
-    const lmap = window._tsa_leaflet_map;
-    if (lmap && lmap.on) {
-      let t = null;
-      lmap.on('moveend', () => {
-        const want = $('#notamhub-foreign') && $('#notamhub-foreign').checked;
-        if (!want) return;
-        clearTimeout(t);
-        t = setTimeout(() => { loadForeign(true); }, 500);
-      });
-    }
+    // (Sin recarga en moveend: los NOTAMs extranjeros se cargan una vez para
+    //  toda la región — ver FOREIGN_BBOX — para no recentrar/recargar al
+    //  desplazar el mapa.)
   }
 
   // ── Carga NotamHub: wiring de inputs/presets ──────────────────────

@@ -1419,7 +1419,6 @@ window.NotamHub.mapView = (function () {
     _setAreasLegendVisible(true);
     _renderAreasLegend(tsas);
 
-    const allLatLngs = [];
     const tsaOpacity = settingsGet('opacity.tsaFill', 0.30);
     // Snapshot del listado para el handler de click (cierra sobre tsas).
     const tsaList = tsas.slice();
@@ -1454,11 +1453,11 @@ window.NotamHub.mapView = (function () {
       });
       poly.bindTooltip(tsa.name, { direction: 'center', className: 'tsa-tooltip' });
       poly.addTo(layerGroup);
-      for (const pt of tsa.polygon) allLatLngs.push(pt);
     }
-    if (allLatLngs.length) {
-      map.fitBounds(L.latLngBounds(allLatLngs), _safeBoundsPadding(30));
-    }
+    // NOTA: NO autocentramos aquí. Hacerlo en cada render provocaba un bucle
+    // moveend → recarga foreign → render → fitBounds → moveend que recentraba
+    // el mapa sin parar e impedía moverlo. El centrado es solo bajo demanda
+    // (botón "Centrar" → fitBounds()) y una vez tras cargar (app.fitToData).
   }
 
   function fitBounds() {
