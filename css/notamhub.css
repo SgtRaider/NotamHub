@@ -444,5 +444,6 @@
     -1px  0   0 #0b1020, 1px  0   0 #0b1020;
 }
 .leaflet-tooltip.aero-label.aero-label-large { font-size: 11px; font-weight: 700; }
+.leaflet-tooltip.aero-label.aero-label-mil { font-size: 11px; font-weight: 700; color: #ffd99a; }
 .leaflet-tooltip.aero-label::before { display: none; }
 .aero-popup .aero-iata { color: var(--nh-accent, #0ea5a4); font-weight: 700; }

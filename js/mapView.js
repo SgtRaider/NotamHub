@@ -123,7 +123,7 @@ window.NotamHub.mapView = (function () {
   //               type='RNAV'   -> zoom>=8
   const _cityItems = [];
   const _wpItems   = [];
-  const _aeroItems = [];   // aeródromos: { marker, tooltip, tier(2=large,3=medium), group }
+  const _aeroItems = [];   // aeródromos: { marker, minZoom, group }
   const ZOOM_TIER_2_CITY = 6;
   const ZOOM_TIER_3_CITY = 8;
   const ZOOM_NAVAID      = 7;
@@ -162,8 +162,7 @@ window.NotamHub.mapView = (function () {
     // Aeródromos: gating por zoom (large z>=6, medium z>=8) dentro de su
     // grupo (toggle). Igual patrón que waypoints.
     for (const it of _aeroItems) {
-      const thresh = it.tier === 2 ? ZOOM_AERO_LARGE : ZOOM_AERO_MEDIUM;
-      const show = z >= thresh;
+      const show = z >= it.minZoom;
       if (show) {
         if (!it.group.hasLayer(it.marker)) it.group.addLayer(it.marker);  // su tooltip (bound) le sigue
       } else if (it.group.hasLayer(it.marker)) {
@@ -270,35 +269,43 @@ window.NotamHub.mapView = (function () {
   // Es un toggle del control de capas (apagado por defecto). El gating por
   // zoom lo aplica _applyZoomVisibility leyendo _aeroItems.
   let _aeroGroup = null;
-  const ZOOM_AERO_LARGE = 6;
-  const ZOOM_AERO_MEDIUM = 8;
+  const ZOOM_AERO_LARGE = 6;   // aeropuertos principales
+  const ZOOM_AERO_MIL    = 7;   // bases / aeródromos militares
+  const ZOOM_AERO_MEDIUM = 8;   // resto de aeródromos
+  // Estilo por tipo: 0=large (cian grande), 1=medium (cian pequeño),
+  // 2=militar (ámbar). minZoom: umbral a partir del cual se muestra.
+  const AERO_COLOR_CIVIL = '#22d3ee';
+  const AERO_COLOR_MIL   = '#f59e0b';
+  function _aeroStyle(t) {
+    if (t === 2) return { color: AERO_COLOR_MIL,   radius: 4.2, minZoom: ZOOM_AERO_MIL,    perm: true,  cls: ' aero-label-mil',   label: 'Base / aeródromo militar' };
+    if (t === 0) return { color: AERO_COLOR_CIVIL, radius: 4.5, minZoom: ZOOM_AERO_LARGE,  perm: true,  cls: ' aero-label-large', label: 'Aeropuerto principal' };
+    return            { color: AERO_COLOR_CIVIL, radius: 3.2, minZoom: ZOOM_AERO_MEDIUM, perm: false, cls: '',                 label: 'Aeródromo' };
+  }
   function buildAerodromeLayer() {
     const geo = window.NotamHub.offlineGeo;
     if (!geo || !Array.isArray(geo.aerodromes) || !geo.aerodromes.length) return null;
     _aeroGroup = L.layerGroup();
     for (const a of geo.aerodromes) {
       if (!Number.isFinite(a.la) || !Number.isFinite(a.lo)) continue;
-      const isLarge = a.t === 0;
+      const st = _aeroStyle(a.t);
       const marker = L.circleMarker([a.la, a.lo], {
-        radius: isLarge ? 4.5 : 3.2,
+        radius: st.radius,
         color: '#0b1020', weight: 1.2,
-        fillColor: '#22d3ee', fillOpacity: 1,
+        fillColor: st.color, fillOpacity: 1,
         pane: 'markerPane',
       });
-      // Etiqueta ICAO: PERMANENTE solo en los grandes (evita centenares de
-      // tooltips en el DOM); en los medianos aparece al pasar el cursor.
+      // Etiqueta ICAO permanente en grandes y militares (importantes); en los
+      // medianos aparece al pasar el cursor (evita saturar el DOM).
       marker.bindTooltip(a.i, {
-        permanent: isLarge, direction: 'right', offset: [5, 0],
-        className: 'aero-label' + (isLarge ? ' aero-label-large' : ''),
+        permanent: st.perm, direction: 'right', offset: [5, 0],
+        className: 'aero-label' + st.cls,
       });
       marker.bindPopup(
         '<div class="aero-popup"><b>' + escapeHTML(a.i) + '</b>' +
-        (a.iata ? ' <span class="aero-iata">' + escapeHTML(a.iata) + '</span>' : '') +
         '<br>' + escapeHTML(a.n || '') +
-        '<br><span class="dim">' + (isLarge ? 'Aeropuerto principal' : 'Aeródromo') +
-        (a.c ? ' · ' + escapeHTML(a.c) : '') + '</span></div>',
+        '<br><span class="dim">' + st.label + (a.c ? ' · ' + escapeHTML(a.c) : '') + '</span></div>',
         { maxWidth: 260 });
-      _aeroItems.push({ marker, tier: isLarge ? 2 : 3, group: _aeroGroup });
+      _aeroItems.push({ marker, minZoom: st.minZoom, group: _aeroGroup });
     }
     // Al activar el toggle, refresca la visibilidad por zoom inmediatamente.
     _aeroGroup.on('add', () => { try { _applyZoomVisibility(); } catch (_) {} });
@@ -1838,18 +1845,19 @@ window.NotamHub.mapView = (function () {
     ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
     for (const a of geo.aerodromes) {
       if (!Number.isFinite(a.la) || !Number.isFinite(a.lo)) continue;
-      const isLarge = a.t === 0;
-      if (z < (isLarge ? ZOOM_AERO_LARGE : ZOOM_AERO_MEDIUM)) continue;
+      const st = _aeroStyle(a.t);
+      if (z < st.minZoom) continue;
       const q = m.latLngToContainerPoint([a.la, a.lo]);
       if (q.x < 0 || q.x > W || q.y < 0 || q.y > H) continue;
-      ctx.font = '700 ' + ((isLarge ? 12.5 : 11) * scale) + 'px system-ui, "Segoe UI", Arial, sans-serif';
-      const r = (isLarge ? 5 : 3.4) * scale;
+      const isBig = a.t !== 1;   // large o militar -> etiqueta mayor
+      ctx.font = '700 ' + ((isBig ? 12.5 : 11) * scale) + 'px system-ui, "Segoe UI", Arial, sans-serif';
+      const r = st.radius * scale;
       ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = '#22d3ee'; ctx.fill();
+      ctx.fillStyle = st.color; ctx.fill();
       ctx.lineWidth = 1.4 * scale; ctx.strokeStyle = 'rgba(11,16,32,0.9)'; ctx.stroke();
       const tx = q.x + r + 3 * scale;
       ctx.lineWidth = 3 * scale; ctx.strokeStyle = 'rgba(11,16,32,0.85)'; ctx.strokeText(a.i, tx, q.y);
-      ctx.fillStyle = '#e6fbff'; ctx.fillText(a.i, tx, q.y);
+      ctx.fillStyle = a.t === 2 ? '#ffe9c2' : '#e6fbff'; ctx.fillText(a.i, tx, q.y);
     }
     ctx.restore();
   }
