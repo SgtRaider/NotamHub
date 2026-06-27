@@ -995,14 +995,9 @@ window.NotamHub.mapView = (function () {
   const METAR_MAX_MARKERS = 250;
   let _metarMoveTimer = null;
   let _metarMoveHandler = null;
-  // Mismo criterio de entorno que meteoApi: en HTTPS no-local usamos el
-  // proxy del mismo origen /api/awc; si no, llamamos directo a AWC.
-  const AWC_ON_REMOTE = typeof location !== 'undefined' &&
-    location.protocol === 'https:' &&
-    !/^(localhost|127\.|192\.168\.|10\.)/i.test(location.hostname);
-  const AWC_METAR_BASE = AWC_ON_REMOTE
-    ? '/api/awc/metar'
-    : 'https://aviationweather.gov/api/data/metar';
+  // Igual que meteoApi: SIEMPRE via proxy same-origin /api/awc (AWC no tiene
+  // CORS). En local usa `wrangler dev` para tener el proxy.
+  const AWC_METAR_BASE = '/api/awc/metar';
 
   // Capa controlable desde el panel: al activarla descarga los METAR del
   // bbox visible y los refresca al mover/zoomear el mapa.

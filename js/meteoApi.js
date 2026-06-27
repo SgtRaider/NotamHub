@@ -23,9 +23,9 @@ window.NotamHub.meteoApi = (function () {
     location.protocol === 'https:' &&
     !/^(localhost|127\.|192\.168\.|10\.)/i.test(location.hostname);
 
-  const AWC_BASE = ON_REMOTE
-    ? '/api/awc'
-    : 'https://aviationweather.gov/api/data';
+  // METAR/TAF/SIGMET SIEMPRE via proxy same-origin /api/awc (aviationweather.gov
+  // no envía CORS). En local usa `wrangler dev` para tener el proxy.
+  const AWC_BASE = '/api/awc';
   const RAINVIEWER_INDEX = 'https://api.rainviewer.com/public/weather-maps.json';
 
   // EUMETVIEW — Cloud Top Height MSG 0 degree (MeteoSat). Cobertura

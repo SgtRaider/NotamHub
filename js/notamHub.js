@@ -19,12 +19,12 @@ window.NotamHub.notamHub = (function () {
 
   const ON_REMOTE = !/^(?:localhost|127\.0\.0\.1)$/i.test(location.hostname) &&
                     location.protocol !== 'file:';
-  // En produccion vamos via Pages Function. En local apuntamos al upstream
-  // directamente (precisa CORS habilitado al upstream, que duckdns suele
-  // permitir).
-  const BASE = ON_REMOTE
-    ? '/api/notamhub'
-    : 'https://notamhub.duckdns.org';
+  // SIEMPRE vamos por el proxy same-origin /api/notamhub: el Worker inyecta el
+  // token, y el upstream duckdns NO tiene CORS y exige token, así que nunca se
+  // puede llamar directo desde el navegador. Para desarrollo local usa
+  // `npx wrangler dev` (levanta el proxy en localhost); servir solo estáticos
+  // (serve.py) hará que /api/notamhub devuelva 404.
+  const BASE = '/api/notamhub';
 
   const TOKEN_KEY = 'notamhub_notamhub_user_token';
 
@@ -46,7 +46,7 @@ window.NotamHub.notamHub = (function () {
   }
 
   function buildUrl(path, qs) {
-    const url = new URL(BASE + path, ON_REMOTE ? location.origin : 'https://notamhub.duckdns.org');
+    const url = new URL(BASE + path, location.origin);
     if (qs) {
       for (const [k, v] of Object.entries(qs)) {
         if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
