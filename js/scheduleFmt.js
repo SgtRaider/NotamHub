@@ -20,6 +20,9 @@ window.NotamHub.scheduleFmt = (function () {
     if (!schedules || !schedules.length) return [];
     const buckets = new Map();
     for (const s of schedules) {
+      // Defensivo: ignora ventanas sin start/end válidos (Date).
+      if (!s || !(s.startUTC instanceof Date) || isNaN(s.startUTC.getTime()) ||
+          !(s.endUTC instanceof Date) || isNaN(s.endUTC.getTime())) continue;
       const start = hhmm(s.startUTC);
       const dur = Math.round((s.endUTC.getTime() - s.startUTC.getTime()) / 60000);
       const key = `${start}|${dur}`;

@@ -719,6 +719,18 @@ window.NotamHub.notamHub = (function () {
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
 
+  // Las fechas del API vienen "naive" (sin zona, p.ej. "2026-05-25T07:00:00").
+  // Las interpretamos como UTC (añadimos 'Z' si no traen indicador de zona).
+  const FAR_PAST   = new Date(Date.UTC(2000, 0, 1));
+  const FAR_FUTURE = new Date(Date.UTC(2099, 11, 31, 23, 59));
+  function _toUTCDate(v, fallback) {
+    if (!v) return fallback || null;
+    let s = v;
+    if (typeof s === 'string' && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(s)) s = s + 'Z';
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? (fallback || null) : d;
+  }
+
   // Normaliza un ForeignNotamOut al shape de UI alineado con normalizeNotam.
   function normalizeForeignNotam(n) {
     if (!n) return null;
@@ -788,12 +800,13 @@ window.NotamHub.notamHub = (function () {
           upperLabel: n.upper_label || 'UNL',
         },
         schedules: [{
-          startUTC: new Date(n.valid_from),
-          endUTC:   n.valid_to ? new Date(n.valid_to) : null,
-          raw:      n.schedule_raw || '',
+          startUTC: _toUTCDate(n.valid_from, FAR_PAST),
+          endUTC:   _toUTCDate(n.valid_to, FAR_FUTURE),
+          raw:      n.schedule_raw || (n.is_permanent ? 'PERM' : ''),
         }],
         remarks: n.body,
         _isWorkArea: false,
+        _isPermanent: !!n.is_permanent,
         _foreign: true,
         country: n.country,
       });

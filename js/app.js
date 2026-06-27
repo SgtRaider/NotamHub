@@ -89,7 +89,9 @@
       const inFilter = f && f.matches ? safeMatches(f, t) : true;
       if (!inFilter) tr.classList.add('out-of-filter');
       const checked = state.selected.has(t._uid) ? 'checked' : '';
-      const windows = (t.schedules && sf && sf.listHTML) ? sf.listHTML(t.schedules) : '';
+      const windows = t._isPermanent
+        ? '<span class="badge">Permanente</span>'
+        : ((t.schedules && sf && sf.listHTML) ? sf.listHTML(t.schedules) : '');
       const origin = t._foreign ? ('Extranjero' + (t.country ? ' · ' + esc(t.country) : '')) : 'Nacional';
       tr.innerHTML =
         '<td class="col-check"><input type="checkbox" class="tsa-row-cb" ' + checked + '></td>' +
