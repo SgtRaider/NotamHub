@@ -89,6 +89,10 @@
       <button type="button" class="tsa-chip tsa-chip-now"     data-tsa-filter="active-now">Activas ahora <span class="tsa-chip-count" data-count="active-now">0</span></button>
     </div>
     <div class="fir-chips hidden" id="fir-filter-chips"></div>
+    <div class="fir-chips hidden" id="cat-filter-chips"></div>
+    <div class="filter-search">
+      <input type="search" id="tsa-search" placeholder="Buscar: nombre, país, FIR, Q-code, texto…" autocomplete="off" spellcheck="false">
+    </div>
     <div class="filter-group">
       <label>Fecha desde <input type="date" id="filter-date-from"></label>
       <label>Fecha hasta <input type="date" id="filter-date-to"></label>
@@ -214,12 +218,12 @@
             <thead>
               <tr>
                 <th class="col-check"><input type="checkbox" id="tsa-select-all-cb" checked title="Seleccionar todas"></th>
-                <th>Nombre</th>
-                <th>Origen</th>
-                <th>Lím. inferior</th>
-                <th>Lím. superior</th>
-                <th>Vértices</th>
-                <th>Ventanas horarias</th>
+                <th class="sortable" data-sort="name">Nombre</th>
+                <th class="sortable" data-sort="fir">Origen</th>
+                <th class="sortable" data-sort="lowerFt">Lím. inferior</th>
+                <th class="sortable" data-sort="upperFt">Lím. superior</th>
+                <th class="sortable" data-sort="vertices">Vértices</th>
+                <th class="sortable" data-sort="validFrom">Vigencia</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -326,6 +330,7 @@
 <script src="js/metarDecode.js"></script>
 <script src="js/meteoApi.js"></script>
 <script src="js/notamHub.js"></script>
+<script src="js/notamDecode.js"></script>
 <script src="js/mapView.js"></script>
 <script src="js/app.js"></script>
 <script src="js/shell.js"></script>

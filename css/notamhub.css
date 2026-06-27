@@ -389,3 +389,26 @@
   border: 1px solid rgba(100,116,139,.45); border-radius: var(--r-pill);
   padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
 }
+
+/* ════════════════════════════════════════════════════════════════
+   6. Ordenación por columnas + buscador + chips de categoría
+   ════════════════════════════════════════════════════════════════ */
+#tsa-table thead th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+#tsa-table thead th.sortable:hover { color: var(--accent); }
+#tsa-table thead th.sortable::after { content: ' ⇅'; opacity: .35; font-size: 9px; }
+#tsa-table thead th.sort-asc::after { content: ' ↑'; opacity: 1; color: var(--accent); }
+#tsa-table thead th.sort-desc::after { content: ' ↓'; opacity: 1; color: var(--accent); }
+
+.filter-search { display: flex; flex: 1 1 220px; }
+.filter-search input {
+  width: 100%; min-width: 200px;
+  padding: 5px 12px; border-radius: var(--r-pill);
+  border: 1px solid var(--border); background: var(--bg-elev);
+  color: var(--text); font-size: 12px; font-family: 'Archivo', Arial, sans-serif;
+}
+.filter-search input:focus { outline: none; border-color: var(--nh-accent-bd); }
+
+.cat-chip .cat-dot {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+  margin-right: 2px; vertical-align: middle; border: 1px solid rgba(0,0,0,.3);
+}

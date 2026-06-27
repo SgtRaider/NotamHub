@@ -30,6 +30,9 @@
     selected: new Set(),
     filter: { dateFrom: '', dateTo: '', timeFrom: '', timeTo: '', tsaType: 'all', activeNow: false },
     firFilter: null,   // null = todos los FIR; Set(...) = solo esos FIR
+    catFilter: null,   // null = todas las categorías; Set(...) = solo esas (foreign)
+    search: '',        // texto libre (nombre/país/FIR/Q-code/cuerpo)
+    sort: { key: 'validFrom', dir: 1 },   // dir 1=asc, -1=desc
     mapReady: false,
     at: '',
     atTo: '',
@@ -66,6 +69,7 @@
     return allItems().filter((t) => {
       if (!state.selected.has(t._uid)) return false;
       if (state.firFilter && !state.firFilter.has(firOf(t))) return false;
+      if (state.catFilter && t._foreign && !state.catFilter.has(t.category)) return false;
       if (f && f.matches) { try { return f.matches(t, state.filter); } catch (_) { return true; } }
       return true;
     });
@@ -88,16 +92,15 @@
   function renderTable() {
     const wrap = $('#tsa-table-wrap');
     const tbody = $('#tsa-table tbody');
-    const items = allItems();
+    const all = allItems();
     if (!tbody) return;
     tbody.innerHTML = '';
     const sf = scheduleFmt();
     const f = filters();
-    let shown = 0;
-    items.forEach((t) => {
-      // El filtro por FIR oculta las filas (no solo las atenúa).
-      if (state.firFilter && !state.firFilter.has(firOf(t))) return;
-      shown++;
+    // Filtra (FIR + categoría + búsqueda) y ordena por la columna elegida.
+    const list = sortItems(all.filter(passesRowFilters));
+    const shown = list.length;
+    list.forEach((t) => {
       const tr = document.createElement('tr');
       tr.dataset.uid = t._uid;
       tr.className = 'tsa-row';
@@ -139,14 +142,48 @@
       tbody.appendChild(dr);
     });
     if (wrap) {
-      wrap.classList.toggle('hidden', items.length === 0);
+      wrap.classList.toggle('hidden', all.length === 0);
     }
     const countBadge = $('#tsa-count');
     if (countBadge) {
-      countBadge.textContent = !items.length ? ''
-        : (state.firFilter && shown < items.length ? (shown + ' / ' + items.length) : String(items.length));
+      countBadge.textContent = !all.length ? '' : (shown < all.length ? (shown + ' / ' + all.length) : String(all.length));
     }
     updateSelectionSummary();
+  }
+
+  // Filtro de fila (FIR + categoría + búsqueda de texto). El filtro de
+  // fecha/tipo se aplica aparte (atenúa filas vía .out-of-filter).
+  function passesRowFilters(t) {
+    if (state.firFilter && !state.firFilter.has(firOf(t))) return false;
+    if (state.catFilter && t._foreign && !state.catFilter.has(t.category)) return false;
+    if (state.search) {
+      const q = state.search.toLowerCase();
+      const hay = ((t.name || '') + ' ' + (t.country || '') + ' ' + (t.fir || '') + ' ' +
+        (t.qCode || '') + ' ' + (t.remarks || '')).toLowerCase();
+      if (hay.indexOf(q) < 0) return false;
+    }
+    return true;
+  }
+  function sortKeyVal(t) {
+    switch (state.sort.key) {
+      case 'name': return (t.name || '').toLowerCase();
+      case 'fir': return firOf(t);
+      case 'lowerFt': return (t.vertical && t.vertical.lowerFt) || 0;
+      case 'upperFt': return (t.vertical && t.vertical.upperFt) || 0;
+      case 'vertices': return (t.polygon && t.polygon.length) || 0;
+      case 'validFrom': return t.validFrom instanceof Date ? t.validFrom.getTime() : (t._isPermanent ? 8.64e15 : 0);
+      case 'validTo': return t.validTo instanceof Date ? t.validTo.getTime() : (t._isPermanent ? 8.64e15 : 0);
+      default: return 0;
+    }
+  }
+  function sortItems(list) {
+    const d = state.sort.dir;
+    return list.slice().sort((a, b) => {
+      const va = sortKeyVal(a), vb = sortKeyVal(b);
+      if (va < vb) return -d;
+      if (va > vb) return d;
+      return 0;
+    });
   }
 
   function safeMatches(f, t) { try { return f.matches(t, state.filter); } catch (_) { return true; } }
@@ -183,12 +220,16 @@
     const rows = [];
     const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push('<div class="d-k">' + esc(k) + '</div><div class="d-v">' + v + '</div>'); };
     if (t._foreign) {
+      const nd = NH.notamDecode;
       add('Categoría', esc(catLabel(t)));
       add('País / FIR', esc([t.country, t.fir].filter(Boolean).join(' / ')));
-      add('Q-code', esc(t.qCode));
-      add('Scope', esc(t.scope));
-      add('Tráfico', esc(t.traffic));
-      add('Propósito', esc(t.purpose));
+      if (t.qCode) {
+        const q = nd ? nd.decodeQ(t.qCode) : null;
+        add('Q-code', '<b>' + esc(t.qCode) + '</b>' + (q && q.text ? ' — ' + esc(q.text) : ''));
+      }
+      if (t.scope)   add('Ámbito (scope)', esc(t.scope) + (nd ? ' — ' + esc(nd.decodeScope(t.scope)) : ''));
+      if (t.traffic) add('Tráfico', esc(t.traffic) + (nd ? ' — ' + esc(nd.decodeTraffic(t.traffic)) : ''));
+      if (t.purpose) add('Propósito', esc(t.purpose) + (nd ? ' — ' + esc(nd.decodePurpose(t.purpose)) : ''));
       add('Aeropuerto', esc(t.airport));
       if (t._military) add('Militar', 'Sí');
     } else {
@@ -262,6 +303,7 @@
       // Los grandes (>75 NM) o sin geometría quedan deseleccionados.
       state.foreign.forEach((t) => { if (!t._largeCircle && !t._noGeometry) state.selected.add(t._uid); });
       rebuildFirFilter();
+      rebuildCatFilter();
       if (rerender) renderAll();
     } catch (err) { console.warn('[app] carga foreign falló:', err); }
   }
@@ -373,6 +415,81 @@
         state.firFilter.add(fir);                               // añade al conjunto
       }
       rebuildFirFilter(); renderAll();
+    });
+    // Filtro por categoría (mismo modelo "aislar" que FIR).
+    const catHost = $('#cat-filter-chips');
+    if (catHost) catHost.addEventListener('click', (e) => {
+      const chip = e.target.closest && e.target.closest('.fir-chip');
+      if (!chip) return;
+      if (chip.dataset.catAll) { state.catFilter = null; rebuildCatFilter(); renderAll(); return; }
+      const k = chip.dataset.cat;
+      if (!k) return;
+      if (state.catFilter === null) state.catFilter = new Set([k]);
+      else if (state.catFilter.has(k)) { state.catFilter.delete(k); if (state.catFilter.size === 0) state.catFilter = null; }
+      else state.catFilter.add(k);
+      rebuildCatFilter(); renderAll();
+    });
+    // Búsqueda de texto (solo afecta a la lista).
+    const search = $('#tsa-search');
+    if (search) search.addEventListener('input', () => { state.search = search.value.trim(); renderTable(); });
+  }
+
+  // Ordenación por columnas: clic en cabecera con data-sort.
+  function wireSortHeaders() {
+    const thead = document.querySelector('#tsa-table thead');
+    if (!thead) return;
+    thead.addEventListener('click', (e) => {
+      const th = e.target.closest && e.target.closest('th[data-sort]');
+      if (!th) return;
+      const key = th.dataset.sort;
+      if (state.sort.key === key) state.sort.dir = -state.sort.dir;
+      else { state.sort.key = key; state.sort.dir = 1; }
+      updateSortIndicators();
+      renderTable();
+    });
+  }
+  function updateSortIndicators() {
+    $$('#tsa-table thead th[data-sort]').forEach((th) => {
+      th.classList.remove('sort-asc', 'sort-desc');
+      if (th.dataset.sort === state.sort.key) th.classList.add(state.sort.dir === 1 ? 'sort-asc' : 'sort-desc');
+    });
+  }
+
+  // Reconstruye los chips de filtro por categoría (NOTAMs extranjeros).
+  function rebuildCatFilter() {
+    const host = $('#cat-filter-chips');
+    if (!host) return;
+    const nh = notamHub();
+    const counts = new Map();
+    allItems().forEach((t) => {
+      if (!t._foreign || t._noGeometry) return;
+      const k = t.category || 'other';
+      counts.set(k, (counts.get(k) || 0) + 1);
+    });
+    const cats = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a));
+    host.innerHTML = '';
+    if (!cats.length) { host.classList.add('hidden'); return; }
+    host.classList.remove('hidden');
+    const lbl = document.createElement('span');
+    lbl.className = 'fir-chips-label';
+    lbl.textContent = 'Tipo:';
+    host.appendChild(lbl);
+    const allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'fir-chip fir-chip-all' + (!state.catFilter ? ' is-active' : '');
+    allChip.dataset.catAll = '1';
+    allChip.textContent = 'Todas';
+    host.appendChild(allChip);
+    cats.forEach((k) => {
+      const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(k) : { label: k, color: '#888' };
+      const on = !state.catFilter || state.catFilter.has(k);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fir-chip cat-chip' + (on ? ' is-active' : '');
+      btn.dataset.cat = k;
+      btn.innerHTML = '<span class="cat-dot" style="background:' + meta.color + '"></span>' + esc(meta.label) +
+        ' <span class="fir-chip-count">' + counts.get(k) + '</span>';
+      host.appendChild(btn);
     });
   }
 
@@ -582,6 +699,8 @@
     wireUpload();
     wireFilter();
     wireSelection();
+    wireSortHeaders();
+    updateSortIndicators();
     // El mapa lo inicializa shell.js (mueve #map y llama ensureMap); cuando
     // ya esté listo, cableamos su toolbar. Reintentamos por si shell tarda.
     const tryToolbar = () => { if (window._tsa_leaflet_map) { wireMapToolbar(); } else { setTimeout(tryToolbar, 120); } };

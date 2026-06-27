@@ -9,7 +9,7 @@
  * Para forzar invalidación al desplegar nueva versión, sube CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'notamhub-v12';
+const CACHE_VERSION = 'notamhub-v13';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -29,6 +29,7 @@ const SHELL_ASSETS = [
   './js/metarDecode.js',
   './js/meteoApi.js',
   './js/notamHub.js',
+  './js/notamDecode.js',
   './js/mapView.js',
   './js/app.js',
   './js/shell.js',
