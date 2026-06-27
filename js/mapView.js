@@ -226,8 +226,22 @@ window.NotamHub.mapView = (function () {
     };
     // Tiles meteo no deben capturar clics (transparentes a eventos).
     ensure('meteoTiles',      410, true);
+    // Límites de países (contornos) por encima de la meteo, bajo las TSAs.
+    ensure('bordersPane',     425, true);
     // TSAs / NOTAMs sí son clicables (popup, tooltip).
     ensure('tsaPane',         440, false);
+  }
+
+  // Capa de LÍMITES DE PAÍSES (solo contornos, sin relleno) a partir de los
+  // datos offline (offlineGeo.countries), para verlos sobre el satélite.
+  function buildCountryBordersLayer() {
+    const geo = window.NotamHub.offlineGeo;
+    if (!geo || !geo.countries || !L.geoJSON) return null;
+    return L.geoJSON(geo.countries, {
+      pane: 'bordersPane',
+      interactive: false,
+      style: { color: '#ffffff', weight: 1, opacity: 0.65, fill: false },
+    });
   }
 
   // Construye el control de capas SOLO con overlays meteorológicos. Las
@@ -235,6 +249,9 @@ window.NotamHub.mapView = (function () {
   // eliminadas en NotamHub: aqui ya no se construyen.
   function addAirwayLayers() {
     const overlays = {};
+    // Límites de países (contornos sobre el satélite). Encendido por defecto.
+    const borders = buildCountryBordersLayer();
+    if (borders) { borders.addTo(map); overlays['Límites de países'] = borders; }
     // Capas meteorológicas — sólo se añaden si el módulo meteoApi está cargado.
     const mapi = window.NotamHub.meteoApi;
     if (mapi) {
