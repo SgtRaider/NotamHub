@@ -1737,12 +1737,12 @@ window.NotamHub.mapView = (function () {
     ctx.closePath();
   }
 
-  function _drawBordersToCanvas(ctx, m) {
+  function _drawBordersToCanvas(ctx, m, scale) {
     const geo = window.NotamHub.offlineGeo;
     if (!geo || !geo.countries || !geo.countries.features) return;
     ctx.save();
     ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.2 * (scale || 1);
     const drawRing = (ring) => {
       ctx.beginPath();
       for (let i = 0; i < ring.length; i++) {
@@ -1765,9 +1765,12 @@ window.NotamHub.mapView = (function () {
   // más cercano, SIN cruzar otras áreas. Devuelve la lista de etiquetas
   // resueltas con su rect, ancla (punto del área) y arranque del leader.
   //   measure(texto) -> ancho en px (ctx.measureText).
-  const _LABEL = { padX: 6, h: 21, gap: 8 };
-  function _computeLabelLayout(m, items, W, H, measure) {
-    const MARGIN = 3;
+  // Constantes de etiqueta en px LÓGICOS (se multiplican por `scale`).
+  const _LABEL = { padX: 6, h: 19, gap: 9, font: 13.5, minLeader: 10 };
+  function _computeLabelLayout(m, items, W, H, measure, scale) {
+    scale = scale || 1;
+    const padX = _LABEL.padX * scale, BH = _LABEL.h * scale, GAP = _LABEL.gap * scale;
+    const MARGIN = 4 * scale, MINLEAD = _LABEL.minLeader * scale;
     // Proyecta cada item a anillos en píxeles.
     const entries = [];
     for (const t of (items || [])) {
@@ -1786,21 +1789,26 @@ window.NotamHub.mapView = (function () {
     }
     const allRings = [];
     entries.forEach((e, ei) => e.rings.forEach((r) => allRings.push({ ring: r, owner: ei })));
-
-    const angles = [];
-    for (let k = 0; k < 24; k++) angles.push((k / 24) * 2 * Math.PI);
-    const dists = [4, 12, 22, 34, 48, 64, 82, 102, 126, 154, 188, 228, 276];
+    const rectOverArea = (rect) => { for (const o of allRings) if (_rectPolyHit(rect, o.ring)) return true; return false; };
 
     const placed = [];                     // rects de etiquetas ya colocadas
+    const rectOverPlaced = (rect) => {
+      for (const pr of placed) if (!(rect.x + rect.w < pr.x || rect.x > pr.x + pr.w || rect.y + rect.h < pr.y || rect.y > pr.y + pr.h)) return true;
+      return false;
+    };
     const results = new Array(entries.length).fill(null);
     // Áreas grandes primero: fijan su etiqueta cerca antes de que las
     // pequeñas ocupen el hueco.
     const order = entries.map((e, i) => i).sort((a, b) => entries[b].area - entries[a].area);
 
+    const angles = [];
+    for (let k = 0; k < 32; k++) angles.push((k / 32) * 2 * Math.PI);
+    const maxReach = Math.max(W, H) * 0.6;
+    const distStep = 11 * scale;
+
     for (const ei of order) {
       const e = entries[ei];
-      const bw = measure(e.label) + _LABEL.padX * 2, bh = _LABEL.h;
-      // Radio aproximado del área (para arrancar fuera de ella).
+      const bw = measure(e.label) + padX * 2, bh = BH;
       let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
       e.rings.forEach((r) => r.forEach((p) => {
         if (p[0] < bx0) bx0 = p[0]; if (p[1] < by0) by0 = p[1];
@@ -1808,47 +1816,31 @@ window.NotamHub.mapView = (function () {
       }));
       const halfDiag = 0.5 * Math.hypot(bx1 - bx0, by1 - by0);
       let chosen = null;
-      for (const dd of dists) {
-        const dist = halfDiag + _LABEL.gap + dd + bh / 2;
+      // Búsqueda radial: distancia creciente; en cada radio prueba 32 ángulos
+      // y se queda con el leader más corto que cumpla TODO.
+      for (let dd = GAP; dd <= maxReach && !chosen; dd += distStep) {
+        const dist = halfDiag + dd + bh / 2;
         let best = null, bestScore = Infinity;
         for (const ang of angles) {
           const cx = e.center[0] + Math.cos(ang) * dist;
           const cy = e.center[1] + Math.sin(ang) * dist;
           const rect = { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh };
-          // Dentro del canvas.
           if (rect.x < MARGIN || rect.y < MARGIN || rect.x + bw > W - MARGIN || rect.y + bh > H - MARGIN) continue;
-          // No solapa NINGÚN área.
-          let bad = false;
-          for (const o of allRings) { if (_rectPolyHit(rect, o.ring)) { bad = true; break; } }
-          if (bad) continue;
-          // No solapa otra etiqueta ya colocada.
-          for (const pr of placed) {
-            if (!(rect.x + bw < pr.x || rect.x > pr.x + pr.w || rect.y + bh < pr.y || rect.y > pr.y + pr.h)) { bad = true; break; }
-          }
-          if (bad) continue;
-          // Ancla = borde del área propia más cercano; leader = desde el borde
-          // de la caja a ese ancla. Debe NO cruzar ninguna OTRA área.
+          if (rectOverArea(rect)) continue;            // no tapa ningún área
+          if (rectOverPlaced(rect)) continue;          // no tapa otra etiqueta
           const anchor = _nearestOnRings([cx, cy], e.rings);
           if (!anchor) continue;
           const ls = _nearestRectPointTo(rect, anchor);
-          for (const o of allRings) {
-            if (o.owner === ei) continue;
-            if (_segPolyHit(ls, anchor, o.ring)) { bad = true; break; }
-          }
-          if (bad) continue;
-          const score = Math.hypot(ls[0] - anchor[0], ls[1] - anchor[1]);   // leader corto = mejor
-          if (score < bestScore) { bestScore = score; best = { rect, anchor, ls }; }
+          const leadLen = Math.hypot(ls[0] - anchor[0], ls[1] - anchor[1]);
+          if (leadLen < MINLEAD) continue;             // deja sitio a la flecha
+          let leaderBad = false;                       // leader no cruza otra área
+          for (const o of allRings) { if (o.owner === ei) continue; if (_segPolyHit(ls, anchor, o.ring)) { leaderBad = true; break; } }
+          if (leaderBad) continue;
+          if (leadLen < bestScore) { bestScore = leadLen; best = { rect, anchor, ls }; }
         }
-        if (best) { chosen = best; break; }
+        if (best) chosen = best;
       }
-      if (!chosen) {
-        // Fallback (muy denso): coloca encima del bbox, recortado al canvas.
-        const rx = Math.max(MARGIN, Math.min(e.center[0] - bw / 2, W - MARGIN - bw));
-        const ry = Math.max(MARGIN, Math.min(by0 - _LABEL.gap - bh, H - MARGIN - bh));
-        const rect = { x: rx, y: ry, w: bw, h: bh };
-        const anchor = _nearestOnRings([rect.x + bw / 2, rect.y + bh / 2], e.rings) || e.center;
-        chosen = { rect, anchor, ls: _nearestRectPointTo(rect, anchor), fallback: true };
-      }
+      if (!chosen) chosen = _gridFallback(e, bw, bh, W, H, MARGIN, scale, rectOverArea, rectOverPlaced);
       placed.push(chosen.rect);
       results[ei] = {
         label: e.label, color: e.color, owner: ei,
@@ -1858,43 +1850,75 @@ window.NotamHub.mapView = (function () {
     return { labels: results.filter(Boolean), allRings };
   }
 
-  // Flecha: punta (tip) en el borde del área apuntando HACIA dentro; el
-  // cuerpo queda FUERA del área (no la tapa).
-  function _drawArrowHead(ctx, from, to, color) {
+  // Fallback cuando la búsqueda radial no encuentra sitio: rejilla sobre todo
+  // el canvas, eligiendo el hueco LIBRE (sin área ni etiqueta) más cercano al
+  // área. Garantiza que la etiqueta NO se solape con otra ni tape un área
+  // (aunque su leader pueda quedar largo). Solo si el canvas está realmente
+  // lleno cae a un último recurso recortado.
+  function _gridFallback(e, bw, bh, W, H, MARGIN, scale, rectOverArea, rectOverPlaced) {
+    const step = Math.max(14 * scale, bh * 0.8);
+    let best = null, bestD = Infinity;
+    for (let gy = MARGIN; gy <= H - MARGIN - bh; gy += step) {
+      for (let gx = MARGIN; gx <= W - MARGIN - bw; gx += step) {
+        const rect = { x: gx, y: gy, w: bw, h: bh };
+        if (rectOverArea(rect) || rectOverPlaced(rect)) continue;
+        const cx = gx + bw / 2, cy = gy + bh / 2;
+        const d = (cx - e.center[0]) * (cx - e.center[0]) + (cy - e.center[1]) * (cy - e.center[1]);
+        if (d < bestD) {
+          const anchor = _nearestOnRings([cx, cy], e.rings) || e.center;
+          bestD = d; best = { rect, anchor, ls: _nearestRectPointTo(rect, anchor), fallback: true };
+        }
+      }
+    }
+    if (best) return best;
+    const rx = Math.max(MARGIN, Math.min(e.center[0] - bw / 2, W - MARGIN - bw));
+    const ry = Math.max(MARGIN, Math.min(e.center[1] - bh / 2, H - MARGIN - bh));
+    const rect = { x: rx, y: ry, w: bw, h: bh };
+    const anchor = _nearestOnRings([rx + bw / 2, ry + bh / 2], e.rings) || e.center;
+    return { rect, anchor, ls: _nearestRectPointTo(rect, anchor), fallback: true };
+  }
+
+  // Flecha clara: punta (tip) en el borde del área apuntando HACIA dentro; el
+  // cuerpo queda FUERA del área (no la tapa). Tamaño/realce escalados.
+  function _drawArrowHead(ctx, from, to, color, scale) {
     const ang = Math.atan2(to[1] - from[1], to[0] - from[0]);
     const len = Math.hypot(to[0] - from[0], to[1] - from[1]);
-    const size = Math.max(5, Math.min(10, len - 1));
-    const a1 = [to[0] - size * Math.cos(ang - 0.45), to[1] - size * Math.sin(ang - 0.45)];
-    const a2 = [to[0] - size * Math.cos(ang + 0.45), to[1] - size * Math.sin(ang + 0.45)];
+    const size = Math.max(9 * scale, Math.min(15 * scale, len - 1));
+    const spread = 0.42;
+    const a1 = [to[0] - size * Math.cos(ang - spread), to[1] - size * Math.sin(ang - spread)];
+    const a2 = [to[0] - size * Math.cos(ang + spread), to[1] - size * Math.sin(ang + spread)];
     ctx.beginPath(); ctx.moveTo(to[0], to[1]); ctx.lineTo(a1[0], a1[1]); ctx.lineTo(a2[0], a2[1]); ctx.closePath();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2 * scale; ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.stroke();  // realce blanco
     ctx.fillStyle = color; ctx.fill();
-    ctx.lineWidth = 1.1; ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.stroke();
   }
 
   // Dibuja las etiquetas (TAG) según el layout calculado: leader con realce
   // blanco + flecha apuntando al área + caja con el nombre.
-  function _drawLabels(ctx, m, items, W, H) {
+  function _drawLabels(ctx, m, items, W, H, scale) {
+    scale = scale || 1;
     ctx.save();
-    ctx.font = '600 14px system-ui, "Segoe UI", Arial, sans-serif';
+    ctx.font = '600 ' + (_LABEL.font * scale) + 'px system-ui, "Segoe UI", Arial, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    const layout = _computeLabelLayout(m, items, W, H, (s) => ctx.measureText(s).width);
+    const layout = _computeLabelLayout(m, items, W, H, (s) => ctx.measureText(s).width, scale);
+    const rad = 4 * scale;
     for (const L of layout.labels) {
       const r = L.rect, anchor = L.anchor, ls = L.leaderStart, color = L.color;
       // Leader: realce blanco debajo + línea de color encima (visible sobre satélite).
       ctx.beginPath(); ctx.moveTo(ls[0], ls[1]); ctx.lineTo(anchor[0], anchor[1]);
-      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 4; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 5 * scale; ctx.stroke();
       ctx.beginPath(); ctx.moveTo(ls[0], ls[1]); ctx.lineTo(anchor[0], anchor[1]);
-      ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.stroke();
-      _drawArrowHead(ctx, ls, anchor, color);
+      ctx.strokeStyle = color; ctx.lineWidth = 2.4 * scale; ctx.stroke();
+      _drawArrowHead(ctx, ls, anchor, color, scale);
       // Caja.
-      _roundRect(ctx, r.x, r.y, r.w, r.h, 4);
-      ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fill();
-      ctx.lineWidth = 1.5; ctx.strokeStyle = color;
-      _roundRect(ctx, r.x, r.y, r.w, r.h, 4); ctx.stroke();
+      _roundRect(ctx, r.x, r.y, r.w, r.h, rad);
+      ctx.fillStyle = 'rgba(255,255,255,0.96)'; ctx.fill();
+      ctx.lineWidth = 1.8 * scale; ctx.strokeStyle = color;
+      _roundRect(ctx, r.x, r.y, r.w, r.h, rad); ctx.stroke();
       // Texto.
       ctx.fillStyle = '#0f172a';
-      ctx.fillText(L.label, r.x + _LABEL.padX, r.y + r.h / 2 + 0.5);
+      ctx.fillText(L.label, r.x + _LABEL.padX * scale, r.y + r.h / 2 + 0.5 * scale);
     }
     ctx.restore();
   }
@@ -1903,6 +1927,8 @@ window.NotamHub.mapView = (function () {
   // No añade tiles (lo hace quien lo necesite). Devuelve { host, m }.
   function _newExportMap(items, W, H, opts) {
     opts = opts || {};
+    const scale = opts.scale || 1;
+    const pad = Math.round(46 * scale);
     const host = document.createElement('div');
     host.style.cssText = 'position:absolute;left:-100000px;top:0;width:' + W + 'px;height:' + H +
       'px;background:' + SEA_COLOR + ';';
@@ -1915,7 +1941,9 @@ window.NotamHub.mapView = (function () {
     const pts = [];
     (items || []).forEach((t) => { _ringsOf(t).forEach((r) => { if (r) r.forEach((p) => pts.push(p)); }); });
     if (pts.length) {
-      try { m.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: opts.maxZoom || 11 }); }
+      // maxZoom alto: con el viewport ampliado (scale) Leaflet elige un zoom
+      // mayor para los mismos límites -> imagen de satélite más nítida.
+      try { m.fitBounds(L.latLngBounds(pts), { padding: [pad, pad], maxZoom: opts.maxZoom || 13 }); }
       catch (_) { m.setView([40, -4], 5); }
     } else {
       m.fitBounds(DEFAULT_BOUNDS);
@@ -1927,14 +1955,16 @@ window.NotamHub.mapView = (function () {
   // calidad (cuántas TAGs tapan un área, leaders que cruzan otra área,
   // etiquetas fuera del canvas, solapes entre etiquetas, fallbacks). Sin
   // tiles ni dibujado. Usado por la suite de validación headless.
-  async function _auditLabelLayout(items, W, H, opts) {
-    W = W || 1240; H = H || 900;
-    const { host, m } = _newExportMap(items, W, H, opts);
+  async function _auditLabelLayout(items, Wl, Hl, opts) {
+    opts = opts || {};
+    const scale = opts.scale || 2;
+    const W = (Wl || 1240) * scale, H = (Hl || 900) * scale;
+    const { host, m } = _newExportMap(items, W, H, { scale: scale, maxZoom: opts.maxZoom });
     let res = null;
     try {
       const ctx = document.createElement('canvas').getContext('2d');
-      ctx.font = '600 14px system-ui, "Segoe UI", Arial, sans-serif';
-      const layout = _computeLabelLayout(m, items, W, H, (s) => ctx.measureText(s).width);
+      ctx.font = '600 ' + (_LABEL.font * scale) + 'px system-ui, "Segoe UI", Arial, sans-serif';
+      const layout = _computeLabelLayout(m, items, W, H, (s) => ctx.measureText(s).width, scale);
       const labels = layout.labels, allRings = layout.allRings;
       let labelOverArea = 0, leaderOverArea = 0, offCanvas = 0, labelOverlap = 0, fallbacks = 0;
       for (const Lb of labels) {
@@ -1962,9 +1992,12 @@ window.NotamHub.mapView = (function () {
   // { dataUrl, width, height } o { dataUrl:null } si falla.
   async function captureForPdf(items, opts) {
     opts = opts || {};
-    const W = opts.width || 1240, H = opts.height || 900;
+    // Resolución: el lienzo se renderiza a `scale`× para que la imagen del PDF
+    // sea nítida (tiles de satélite a mayor zoom + texto/flechas afiladas).
+    const SCALE = opts.scale || 2;
+    const W = (opts.width || 1240) * SCALE, H = (opts.height || 900) * SCALE;
     const useStreet = !!(map && _baseStreet && map.hasLayer(_baseStreet));
-    const built = _newExportMap(items, W, H, opts);
+    const built = _newExportMap(items, W, H, { scale: SCALE, maxZoom: opts.maxZoom });
     const host = built.host;
     let m = built.m, dataUrl = null;
     try {
@@ -1972,7 +2005,7 @@ window.NotamHub.mapView = (function () {
         ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
         : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
       L.tileLayer(url, { crossOrigin: 'anonymous', maxZoom: 19 }).addTo(m);
-      await _waitTiles(host, 9000);
+      await _waitTiles(host, 12000);
 
       const canvas = document.createElement('canvas');
       canvas.width = W; canvas.height = H;
@@ -1989,12 +2022,12 @@ window.NotamHub.mapView = (function () {
             Math.ceil(r.width), Math.ceil(r.height));
         } catch (_) { /* tile contaminado: se omite */ }
       });
-      _drawBordersToCanvas(ctx, m);
+      _drawBordersToCanvas(ctx, m, SCALE);
       // Polígonos NOTAM (cada parte por separado).
       for (const t of (items || [])) {
         const rings = _ringsOf(t); if (!rings.length) continue;
         const color = tsaColor(t);
-        ctx.lineWidth = 2; ctx.strokeStyle = color; ctx.fillStyle = _hexToRgba(color, 0.25);
+        ctx.lineWidth = 2 * SCALE; ctx.strokeStyle = color; ctx.fillStyle = _hexToRgba(color, 0.25);
         for (const ring of rings) {
           if (!ring || ring.length < 3) continue;
           ctx.beginPath();
@@ -2005,8 +2038,8 @@ window.NotamHub.mapView = (function () {
           ctx.closePath(); ctx.fill(); ctx.stroke();
         }
       }
-      _drawLabels(ctx, m, items, W, H);
-      try { dataUrl = canvas.toDataURL('image/jpeg', 0.92); }
+      _drawLabels(ctx, m, items, W, H, SCALE);
+      try { dataUrl = canvas.toDataURL('image/jpeg', 0.95); }
       catch (e) { console.warn('[mapView] toDataURL falló (canvas contaminado?):', e); dataUrl = null; }
     } catch (e) {
       console.warn('[mapView] captureForPdf falló:', e);
