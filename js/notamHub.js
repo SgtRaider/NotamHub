@@ -17,16 +17,18 @@ window.NotamHub = window.NotamHub || {};
 window.NotamHub.notamHub = (function () {
   'use strict';
 
-  const ON_REMOTE = !/^(?:localhost|127\.0\.0\.1)$/i.test(location.hostname) &&
-                    location.protocol !== 'file:';
-  // SIEMPRE vamos por el proxy same-origin /api/notamhub: el Worker inyecta el
-  // token, y el upstream duckdns NO tiene CORS y exige token, así que nunca se
-  // puede llamar directo desde el navegador. Para desarrollo local usa
-  // `npx wrangler dev` (levanta el proxy en localhost); servir solo estáticos
-  // (serve.py) hará que /api/notamhub devuelva 404.
-  const BASE = '/api/notamhub';
+  // Llamada DIRECTA a la API duckdns. Requiere CORS habilitado en el FastAPI
+  // (allow_origins con el dominio de la web + allow_headers x-user-token /
+  // x-admin-token). El token de usuario viaja en la cabecera desde el cliente.
+  const BASE = 'https://notamhub.duckdns.org';
+
+  // Token de usuario (scope user) por defecto — el mismo que ya es público en
+  // el repo. El usuario puede sobreescribirlo por localStorage. NOTA: en modo
+  // directo el token de usuario viaja al navegador (es de unidad, no personal).
+  const DEFAULT_USER_TOKEN = 'FPIy1bgWG5gGRviMKSxeLInxZvjD1KYhILgof0WVgfg';
 
   const TOKEN_KEY = 'notamhub_notamhub_user_token';
+  const ADMIN_TOKEN_KEY = 'notamhub_admin_token';
 
   function getStoredToken() {
     try { return localStorage.getItem(TOKEN_KEY) || null; } catch (_) { return null; }
@@ -37,16 +39,23 @@ window.NotamHub.notamHub = (function () {
   function clearStoredToken() {
     try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
   }
+  function getStoredAdminToken() {
+    try { return localStorage.getItem(ADMIN_TOKEN_KEY) || null; } catch (_) { return null; }
+  }
+  function setStoredAdminToken(token) {
+    try { localStorage.setItem(ADMIN_TOKEN_KEY, token || ''); } catch (_) {}
+  }
 
   function buildHeaders() {
     const h = { 'Accept': 'application/json' };
-    const t = getStoredToken();
-    if (t) h['x-user-token'] = t;
+    h['x-user-token'] = getStoredToken() || DEFAULT_USER_TOKEN;
+    const admin = getStoredAdminToken();
+    if (admin) h['x-admin-token'] = admin;
     return h;
   }
 
   function buildUrl(path, qs) {
-    const url = new URL(BASE + path, location.origin);
+    const url = new URL(BASE + path);
     if (qs) {
       for (const [k, v] of Object.entries(qs)) {
         if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);

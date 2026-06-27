@@ -51,57 +51,72 @@ js/
   i18n.js               Internacionalización (es/en)
   geom.js               Utilidades geométricas
   offlineGeo.js         Cartografía Natural Earth embebida
-_worker.js              Worker: sirve estáticos + proxy /api/notamhub y /api/awc
-wrangler.toml           Config de despliegue (Cloudflare Worker + Static Assets)
+_worker.js              (opcional) Worker proxy /api/* — no usado en modo directo
+wrangler.toml           (opcional) Config de Worker + Static Assets
 ```
 
-> `notamhub.duckdns.org` y `aviationweather.gov` no envían cabeceras CORS, por
-> lo que el navegador no puede llamarlos directamente: las peticiones pasan por
-> el proxy same-origin del Worker (`/api/*`).
+> **Modo directo (actual):** la web llama a `notamhub.duckdns.org` directamente
+> para NOTAMs/TSAs (requiere CORS habilitado en esa API, ver más abajo). La
+> meteo de AWC (`aviationweather.gov`, que no es nuestra y no tiene CORS) usa un
+> proxy CORS público como *fallback*. RainViewer/EUMETSAT van directas.
 
 Todo cuelga del namespace global `window.NotamHub`. Cada módulo es un IIFE que
 registra un sub-objeto; no hay paso de *build*.
 
 ## Ejecución local
 
-Necesita servirse por HTTP (no `file://`) para evitar problemas de CORS:
+Sírvelo por HTTP (no `file://`):
 
 ```sh
-npx wrangler dev       # http://localhost:8787 — RECOMENDADO (proxies /api/* activos)
-# alternativas SOLO para la UI (la carga de NOTAMs fallará por CORS):
 python serve.py        # http://127.0.0.1:8000
 start.bat              # Windows
+# o:  npx http-server -p 8000
 ```
 
-Para que la carga de NOTAMs/meteo funcione en local hace falta el proxy del
-Worker, así que usa `npx wrangler dev` (sirve estáticos + `/api/*`). Servir solo
-los ficheros estáticos (serve.py / http-server) muestra la UI pero las llamadas
-a las APIs externas fallan por CORS.
+En modo directo la web llama a duckdns/AWC sin proxy propio, así que basta con
+servir los estáticos. La carga de NOTAMs requiere que tu API duckdns tenga CORS
+habilitado para el origen desde el que sirves (p. ej. `http://127.0.0.1:8000`).
 
-## Despliegue (Cloudflare Worker)
+## Habilitar CORS en la API (duckdns) — IMPRESCINDIBLE
 
-```sh
-npx wrangler deploy
+Como la web llama a `notamhub.duckdns.org` directamente, tu FastAPI debe permitir
+el origen de la web y las cabeceras de token:
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://notamhub.asraelus.workers.dev",
+        "http://127.0.0.1:8000",   # desarrollo local
+    ],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["x-user-token", "x-admin-token", "Content-Type"],
+)
 ```
 
-Despliega a `https://<name>.<subdominio>.workers.dev` usando `wrangler.toml`
-(Worker `_worker.js` + Static Assets). Configura el token como secreto:
+(`allow_origins=["*"]` también vale; con tokens en cabecera y sin cookies es
+aceptable.) Sin esto, el navegador bloqueará las llamadas y verás errores CORS/401.
 
-```sh
-npx wrangler secret put NOTAMHUB_USER_TOKEN
-npx wrangler secret put NOTAMHUB_ADMIN_TOKEN
+## Despliegue (web estática)
+
+La web es 100% estática: sirve con cualquier hosting (Cloudflare Workers Static
+Assets, Pages, etc.). Tu deploy actual en `workers.dev` ya vale — vuelve a
+publicar los ficheros tras `git pull`.
+
+El token de usuario va en el cliente (`DEFAULT_USER_TOKEN` en `notamHub.js`, ya
+público). Para usar el scope **admin** sin exponerlo en el código, define el
+token en el navegador:
+
+```js
+localStorage.setItem('notamhub_admin_token', '<tu-token-admin>')
 ```
 
-El proxy inyecta `x-user-token` (scope user) y `x-admin-token` (scope admin,
-para endpoints/datos protegidos de la API ICARO):
-
-- `NOTAMHUB_USER_TOKEN` — tiene un valor por defecto en `_worker.js` para que
-  arranque sin configurar nada (recomendable rotarlo y moverlo al secreto).
-- `NOTAMHUB_ADMIN_TOKEN` — por seguridad **no** hay valor por defecto en el
-  código; defínelo como secreto para habilitar el scope admin.
-
-**Cloudflare Pages** también funciona: `_worker.js` en la raíz activa el
-*advanced mode* (sirve `env.ASSETS` + los proxies), sin necesidad de `functions/`.
+> Alternativa: si prefieres NO exponer el token ni depender de CORS en duckdns,
+> el repo incluye `_worker.js` (proxy `/api/*`). Para usarlo, cambia las bases de
+> `notamHub.js`/`meteoApi.js`/`mapView.js` de las URLs directas a `/api/...` y
+> despliega con `npx wrangler deploy`.
 
 ## Fuentes de datos y atribución
 

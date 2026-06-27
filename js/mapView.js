@@ -995,9 +995,10 @@ window.NotamHub.mapView = (function () {
   const METAR_MAX_MARKERS = 250;
   let _metarMoveTimer = null;
   let _metarMoveHandler = null;
-  // Igual que meteoApi: SIEMPRE via proxy same-origin /api/awc (AWC no tiene
-  // CORS). En local usa `wrangler dev` para tener el proxy.
-  const AWC_METAR_BASE = '/api/awc/metar';
+  // AWC directo (no es nuestro servidor; no envía CORS), con fallback a proxy
+  // CORS público cuando el navegador bloquea la llamada directa.
+  const AWC_METAR_BASE = 'https://aviationweather.gov/api/data/metar';
+  const AWC_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
   // Capa controlable desde el panel: al activarla descarga los METAR del
   // bbox visible y los refresca al mover/zoomear el mapa.
@@ -1048,8 +1049,15 @@ window.NotamHub.mapView = (function () {
     loadingMsg.addTo(map);
 
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      let res;
+      try {
+        res = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      } catch (corsErr) {
+        // CORS / red: reintenta vía proxy público.
+        res = await fetch(AWC_CORS_PROXY + encodeURIComponent(url));
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+      }
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       // Deduplicamos por ICAO (AWC puede devolver varias obs) quedandonos

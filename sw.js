@@ -9,7 +9,7 @@
  * Para forzar invalidación al desplegar nueva versión, sube CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'notamhub-v3';
+const CACHE_VERSION = 'notamhub-v4';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -47,6 +47,7 @@ const NETWORK_FIRST_HOSTS = [
   'tilecache.rainviewer.com',
   'api.rainviewer.com',
   'notamhub.duckdns.org',
+  'api.allorigins.win',
 ];
 
 self.addEventListener('install', (event) => {
