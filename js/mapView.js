@@ -123,6 +123,7 @@ window.NotamHub.mapView = (function () {
   //               type='RNAV'   -> zoom>=8
   const _cityItems = [];
   const _wpItems   = [];
+  const _aeroItems = [];   // aeródromos: { marker, tooltip, tier(2=large,3=medium), group }
   const ZOOM_TIER_2_CITY = 6;
   const ZOOM_TIER_3_CITY = 8;
   const ZOOM_NAVAID      = 7;
@@ -158,9 +159,21 @@ window.NotamHub.mapView = (function () {
         if (it.group.hasLayer(it.tooltip)) it.group.removeLayer(it.tooltip);
       }
     }
+    // Aeródromos: gating por zoom (large z>=6, medium z>=8) dentro de su
+    // grupo (toggle). Igual patrón que waypoints.
+    for (const it of _aeroItems) {
+      const thresh = it.tier === 2 ? ZOOM_AERO_LARGE : ZOOM_AERO_MEDIUM;
+      const show = z >= thresh;
+      if (show) {
+        if (!it.group.hasLayer(it.marker)) it.group.addLayer(it.marker);  // su tooltip (bound) le sigue
+      } else if (it.group.hasLayer(it.marker)) {
+        it.group.removeLayer(it.marker);
+      }
+    }
     console.info('[mapView] zoom=' + z + ' visibles -> ciudades:'
       + _cityItems.filter(i => map.hasLayer(i.marker)).length + '/' + _cityItems.length
-      + ' waypoints:' + _wpItems.filter(i => i.group.hasLayer(i.marker)).length + '/' + _wpItems.length);
+      + ' waypoints:' + _wpItems.filter(i => i.group.hasLayer(i.marker)).length + '/' + _wpItems.length
+      + ' aeródromos:' + _aeroItems.filter(i => i.group.hasLayer(i.marker)).length + '/' + _aeroItems.length);
   }
 
   let _baseSat = null, _baseStreet = null;
@@ -237,15 +250,60 @@ window.NotamHub.mapView = (function () {
   }
 
   // Capa de LÍMITES DE PAÍSES (solo contornos, sin relleno) a partir de los
-  // datos offline (offlineGeo.countries), para verlos sobre el satélite.
+  // datos offline (offlineGeo.countries, Natural Earth 1:50m en la región).
+  // Para que las divisiones se vean nítidas SOBRE el satélite usamos doble
+  // trazo: un "casing" oscuro ancho debajo + una línea clara fina encima.
   function buildCountryBordersLayer() {
     const geo = window.NotamHub.offlineGeo;
-    if (!geo || !geo.countries || !L.geoJSON) return null;
-    return L.geoJSON(geo.countries, {
-      pane: 'bordersPane',
-      interactive: false,
-      style: { color: '#ffffff', weight: 1, opacity: 0.65, fill: false },
-    });
+    const data = geo && (geo.borders || geo.countries);
+    if (!data || !L.geoJSON) return null;
+    const grp = L.layerGroup();
+    L.geoJSON(data, { pane: 'bordersPane', interactive: false,
+      style: { color: '#0b1020', weight: 4.2, opacity: 0.6, fill: false, lineCap: 'round', lineJoin: 'round' } }).addTo(grp);
+    L.geoJSON(data, { pane: 'bordersPane', interactive: false,
+      style: { color: '#ffffff', weight: 1.7, opacity: 1, fill: false, lineCap: 'round', lineJoin: 'round' } }).addTo(grp);
+    return grp;
+  }
+
+  // Capa de AERÓDROMOS (offlineGeo.aerodromes, OurAirports). Marcadores con
+  // etiqueta ICAO, filtrados por zoom: large desde z>=6, medium desde z>=8.
+  // Es un toggle del control de capas (apagado por defecto). El gating por
+  // zoom lo aplica _applyZoomVisibility leyendo _aeroItems.
+  let _aeroGroup = null;
+  const ZOOM_AERO_LARGE = 6;
+  const ZOOM_AERO_MEDIUM = 8;
+  function buildAerodromeLayer() {
+    const geo = window.NotamHub.offlineGeo;
+    if (!geo || !Array.isArray(geo.aerodromes) || !geo.aerodromes.length) return null;
+    _aeroGroup = L.layerGroup();
+    for (const a of geo.aerodromes) {
+      if (!Number.isFinite(a.la) || !Number.isFinite(a.lo)) continue;
+      const isLarge = a.t === 0;
+      const marker = L.circleMarker([a.la, a.lo], {
+        radius: isLarge ? 4.5 : 3.2,
+        color: '#0b1020', weight: 1.2,
+        fillColor: '#22d3ee', fillOpacity: 1,
+        pane: 'markerPane',
+      });
+      // Etiqueta ICAO: PERMANENTE solo en los grandes (evita centenares de
+      // tooltips en el DOM); en los medianos aparece al pasar el cursor.
+      marker.bindTooltip(a.i, {
+        permanent: isLarge, direction: 'right', offset: [5, 0],
+        className: 'aero-label' + (isLarge ? ' aero-label-large' : ''),
+      });
+      marker.bindPopup(
+        '<div class="aero-popup"><b>' + escapeHTML(a.i) + '</b>' +
+        (a.iata ? ' <span class="aero-iata">' + escapeHTML(a.iata) + '</span>' : '') +
+        '<br>' + escapeHTML(a.n || '') +
+        '<br><span class="dim">' + (isLarge ? 'Aeropuerto principal' : 'Aeródromo') +
+        (a.c ? ' · ' + escapeHTML(a.c) : '') + '</span></div>',
+        { maxWidth: 260 });
+      _aeroItems.push({ marker, tier: isLarge ? 2 : 3, group: _aeroGroup });
+    }
+    // Al activar el toggle, refresca la visibilidad por zoom inmediatamente.
+    _aeroGroup.on('add', () => { try { _applyZoomVisibility(); } catch (_) {} });
+    console.info('[mapView] aeródromos cargados:', _aeroItems.length);
+    return _aeroGroup;
   }
 
   // Construye el control de capas SOLO con overlays meteorológicos. Las
@@ -256,6 +314,10 @@ window.NotamHub.mapView = (function () {
     // Límites de países (contornos sobre el satélite). Encendido por defecto.
     const borders = buildCountryBordersLayer();
     if (borders) { borders.addTo(map); overlays['Límites de países'] = borders; }
+    // Aeródromos (OurAirports): encendido por defecto pero filtrado por zoom
+    // (large z>=6, medium z>=8), así que a zoom bajo no satura. Toggle propio.
+    const aero = buildAerodromeLayer();
+    if (aero) { aero.addTo(map); overlays['Aeródromos'] = aero; }
     // Capas meteorológicas — sólo se añaden si el módulo meteoApi está cargado.
     const mapi = window.NotamHub.meteoApi;
     if (mapi) {
@@ -1738,23 +1800,56 @@ window.NotamHub.mapView = (function () {
   }
 
   function _drawBordersToCanvas(ctx, m, scale) {
+    scale = scale || 1;
     const geo = window.NotamHub.offlineGeo;
-    if (!geo || !geo.countries || !geo.countries.features) return;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
-    ctx.lineWidth = 1.2 * (scale || 1);
-    const drawRing = (ring) => {
-      ctx.beginPath();
-      for (let i = 0; i < ring.length; i++) {
-        const q = m.latLngToContainerPoint([ring[i][1], ring[i][0]]);  // geojson = [lon,lat]
-        if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+    const data = geo && (geo.borders || geo.countries);
+    if (!data || !data.features) return;
+    const tracePath = () => {
+      for (const f of data.features) {
+        const g = f && f.geometry; if (!g) continue;
+        const drawRing = (ring) => {
+          ctx.beginPath();
+          for (let i = 0; i < ring.length; i++) {
+            const q = m.latLngToContainerPoint([ring[i][1], ring[i][0]]);  // geojson = [lon,lat]
+            if (i === 0) ctx.moveTo(q.x, q.y); else ctx.lineTo(q.x, q.y);
+          }
+          ctx.stroke();
+        };
+        if (g.type === 'Polygon') g.coordinates.forEach(drawRing);
+        else if (g.type === 'MultiPolygon') g.coordinates.forEach((poly) => poly.forEach(drawRing));
       }
-      ctx.stroke();
     };
-    for (const f of geo.countries.features) {
-      const g = f && f.geometry; if (!g) continue;
-      if (g.type === 'Polygon') g.coordinates.forEach(drawRing);
-      else if (g.type === 'MultiPolygon') g.coordinates.forEach((poly) => poly.forEach(drawRing));
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    // Casing oscuro debajo + línea clara encima -> divisiones nítidas.
+    ctx.strokeStyle = 'rgba(11,16,32,0.6)'; ctx.lineWidth = 4.2 * scale; tracePath();
+    ctx.strokeStyle = 'rgba(255,255,255,1)'; ctx.lineWidth = 1.7 * scale; tracePath();
+    ctx.restore();
+  }
+
+  // Dibuja los AERÓDROMOS visibles en el PDF: marcador + etiqueta ICAO, con
+  // el mismo gating por zoom que la capa viva (large z>=6, medium z>=8). Se
+  // dibuja ANTES de las etiquetas NOTAM para que éstas queden por encima.
+  function _drawAerodromes(ctx, m, W, H, scale) {
+    const geo = window.NotamHub.offlineGeo;
+    if (!geo || !Array.isArray(geo.aerodromes)) return;
+    const z = m.getZoom();
+    ctx.save();
+    ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+    for (const a of geo.aerodromes) {
+      if (!Number.isFinite(a.la) || !Number.isFinite(a.lo)) continue;
+      const isLarge = a.t === 0;
+      if (z < (isLarge ? ZOOM_AERO_LARGE : ZOOM_AERO_MEDIUM)) continue;
+      const q = m.latLngToContainerPoint([a.la, a.lo]);
+      if (q.x < 0 || q.x > W || q.y < 0 || q.y > H) continue;
+      ctx.font = '700 ' + ((isLarge ? 12.5 : 11) * scale) + 'px system-ui, "Segoe UI", Arial, sans-serif';
+      const r = (isLarge ? 5 : 3.4) * scale;
+      ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#22d3ee'; ctx.fill();
+      ctx.lineWidth = 1.4 * scale; ctx.strokeStyle = 'rgba(11,16,32,0.9)'; ctx.stroke();
+      const tx = q.x + r + 3 * scale;
+      ctx.lineWidth = 3 * scale; ctx.strokeStyle = 'rgba(11,16,32,0.85)'; ctx.strokeText(a.i, tx, q.y);
+      ctx.fillStyle = '#e6fbff'; ctx.fillText(a.i, tx, q.y);
     }
     ctx.restore();
   }
@@ -2038,6 +2133,7 @@ window.NotamHub.mapView = (function () {
           ctx.closePath(); ctx.fill(); ctx.stroke();
         }
       }
+      _drawAerodromes(ctx, m, W, H, SCALE);
       _drawLabels(ctx, m, items, W, H, SCALE);
       try { dataUrl = canvas.toDataURL('image/jpeg', 0.95); }
       catch (e) { console.warn('[mapView] toDataURL falló (canvas contaminado?):', e); dataUrl = null; }

@@ -431,3 +431,18 @@
   display: inline-block; width: 9px; height: 9px; border-radius: 50%;
   margin-right: 2px; vertical-align: middle; border: 1px solid rgba(0,0,0,.3);
 }
+
+/* Etiquetas ICAO de aeródromos sobre el satélite: texto claro con casing
+   oscuro para contraste (combina con el marcador cian). */
+.leaflet-tooltip.aero-label {
+  background: transparent; border: none; box-shadow: none; padding: 0 2px;
+  color: #e6fbff; font-size: 9.5px; font-weight: 600; letter-spacing: .2px;
+  text-shadow:
+    -1px -1px 0 #0b1020, 1px -1px 0 #0b1020,
+    -1px  1px 0 #0b1020, 1px  1px 0 #0b1020,
+     0   -1px 0 #0b1020, 0    1px 0 #0b1020,
+    -1px  0   0 #0b1020, 1px  0   0 #0b1020;
+}
+.leaflet-tooltip.aero-label.aero-label-large { font-size: 11px; font-weight: 700; }
+.leaflet-tooltip.aero-label::before { display: none; }
+.aero-popup .aero-iata { color: var(--nh-accent, #0ea5a4); font-weight: 700; }
