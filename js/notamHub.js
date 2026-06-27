@@ -419,6 +419,7 @@ window.NotamHub.notamHub = (function () {
         id: 'NH_' + (t.parent_notam_id || i) + '_' + i,
         name: t.name,
         format: 'NOTAMHUB',
+        category: 'tsa',            // tipo propio en el filtro "Tipo" + color verde
         vertical: { lowerFt, upperFt, lowerLabel, upperLabel },
         polygon,
         parts,
@@ -878,6 +879,7 @@ window.NotamHub.notamHub = (function () {
   // viene casi siempre "INTERNATIONAL", inservible para clasificar.)
   // Colores VIVOS y saturados para que resalten sobre la imagen de satélite.
   const FOREIGN_CATEGORY_META = {
+    tsa:        { label: 'TSA',                     color: '#30d158' },
     restricted: { label: 'Restringida / Prohibida', color: '#ff3b30' },
     danger:     { label: 'Zona de peligro (D)',     color: '#ff9500' },
     military:   { label: 'Militar / ejercicios',    color: '#ff2d55' },

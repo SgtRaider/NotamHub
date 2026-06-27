@@ -60,7 +60,9 @@ window.NotamHub.mapView = (function () {
   // AREA_COLORS. Si no, fallback a la banda vertical.
   function tsaColor(tsa) {
     // NOTAM con categoría (nacional o extranjero) -> color de su categoría.
-    if (tsa && tsa.category) {
+    // Excepción: las TSAs (category 'tsa') conservan el color por tipo de área
+    // (trabajo=verde / tránsito=rojo); 'tsa' es solo una etiqueta del filtro.
+    if (tsa && tsa.category && tsa.category !== 'tsa') {
       const nh = window.NotamHub.notamHub;
       const meta = nh && nh.getForeignCategoryMeta ? nh.getForeignCategoryMeta(tsa.category) : null;
       if (meta && meta.color) return meta.color;
