@@ -365,7 +365,9 @@ window.NotamHub.notamHub = (function () {
 
       // Poligono: preferimos polygon_geojson; si la TSA es circular y
       // viene con circle_center_*/circle_radius_nm, generamos el anillo.
-      let polygon = geojsonToLatLngArray(t.polygon_geojson);
+      let polygon = null, parts = null;
+      const ppT = geojsonToParts(t.polygon_geojson).filter(r => r && r.length >= 3);
+      if (ppT.length) { polygon = ppT[0]; if (ppT.length > 1) parts = ppT; }
       if ((!polygon || polygon.length < 3) && t.is_circle &&
           Number.isFinite(t.circle_center_lat) &&
           Number.isFinite(t.circle_center_lon) &&
@@ -419,6 +421,7 @@ window.NotamHub.notamHub = (function () {
         format: 'NOTAMHUB',
         vertical: { lowerFt, upperFt, lowerLabel, upperLabel },
         polygon,
+        parts,
         // El parser PDF rellena centroid via geom.centroid(polygon). El
         // corte transversal (chooseExtremes -> greatCircleDistance) lo
         // necesita; sin centroid crashea con "Cannot read properties of
@@ -589,6 +592,25 @@ window.NotamHub.notamHub = (function () {
       }
     }
     return null;
+  }
+
+  // Devuelve las PARTES (anillos exteriores) por separado de un GeoJSON:
+  // Polygon -> [ring]; MultiPolygon -> [ring1, ring2, …]. Cada anillo es
+  // [[lat,lon],…]. Mantener las partes separadas evita las "líneas de unión"
+  // al dibujar (un MultiPolygon NO debe concatenarse en un único polígono).
+  function geojsonToParts(g) {
+    if (!g) return [];
+    if (g.type === 'Polygon' && Array.isArray(g.coordinates) && g.coordinates[0]) {
+      return [g.coordinates[0].map(p => [Number(p[1]), Number(p[0])])];
+    }
+    if (g.type === 'MultiPolygon' && Array.isArray(g.coordinates)) {
+      const parts = [];
+      for (const poly of g.coordinates) {
+        if (poly && poly[0]) parts.push(poly[0].map(p => [Number(p[1]), Number(p[0])]));
+      }
+      return parts;
+    }
+    return [];
   }
 
   // Extrae el sub-bloque de body correspondiente a una TSA. Cada NOTAM
@@ -912,12 +934,13 @@ window.NotamHub.notamHub = (function () {
       // el NOTAM aplica a todo el FIR, sin área concreta. NO se dibuja (un
       // círculo enorme taparía el mapa); se lista como NOTAM informativo.
       let firWide = (n.geometry_type === 'circle') && radiusNm != null && radiusNm >= FIRWIDE_NM;
-      let polygon = null;
+      let polygon = null, parts = null;
       let isCircleGeom = (n.geometry_type === 'circle');
       let circleR = isCircleGeom ? radiusNm : null;
       if (!firWide) {
         if (n.geometry && (n.geometry.type === 'Polygon' || n.geometry.type === 'MultiPolygon')) {
-          polygon = geojsonToLatLngArray(n.geometry);
+          const pp = geojsonToParts(n.geometry).filter(r => r && r.length >= 3);
+          if (pp.length) { polygon = pp[0]; if (pp.length > 1) parts = pp; }
         }
         if ((!polygon || polygon.length < 3) && n.geometry_type === 'circle' &&
             Number.isFinite(n.center_lat) && Number.isFinite(n.center_lon) && Number.isFinite(n.radius_nm)) {
@@ -951,6 +974,7 @@ window.NotamHub.notamHub = (function () {
         name: (n.notam_number || '') + ' ' + (n.country || ''),
         format: 'NOTAM',
         polygon: hasGeom ? polygon : null,
+        parts: hasGeom ? parts : null,
         centroid: hasGeom ? polygonCentroid(polygon) : null,
         vertical: {
           lowerFt: n.fl_lower != null ? n.fl_lower * 100 : 0,

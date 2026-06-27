@@ -1429,6 +1429,18 @@ window.NotamHub.mapView = (function () {
     return `<div class="tsa-popup-multi">${head}${blocks}</div>`;
   }
 
+  // Anillos a dibujar de un item: sus partes (MultiPolygon) o su único polígono.
+  function _ringsOf(t) {
+    if (t.parts && t.parts.length) return t.parts;
+    return t.polygon ? [t.polygon] : [];
+  }
+  // ¿El punto cae dentro de ALGUNA parte del item? (para el click combinado).
+  function _pointInTsa(latlon, t) {
+    const rings = _ringsOf(t);
+    for (const r of rings) { if (r && r.length >= 3 && pointInPoly(latlon, r)) return true; }
+    return false;
+  }
+
   function render(tsas) {
     if (!map) return;
     layerGroup.clearLayers();
@@ -1448,34 +1460,37 @@ window.NotamHub.mapView = (function () {
     // Render: áreas grandes primero (debajo) y pequeñas después (encima),
     // para que las zonas pequeñas no queden ocultas por FIRs enormes.
     const ordered = tsas.slice().sort((a, b) => _approxAreaDeg(b.polygon) - _approxAreaDeg(a.polygon));
+    const onClick = (e) => {
+      const latlon = [e.latlng.lat, e.latlng.lng];
+      const containing = tsaList.filter(t => _pointInTsa(latlon, t));
+      if (!containing.length) return;
+      L.popup({ maxWidth: 520, minWidth: 280, autoPan: true })
+        .setLatLng(e.latlng)
+        .setContent(buildCombinedPopup(containing))
+        .openOn(map);
+    };
     for (const tsa of ordered) {
-      if (!tsa.polygon || tsa.polygon.length < 3) continue;   // sin geometría dibujable
+      const rings = _ringsOf(tsa);
+      if (!rings.length) continue;
       const color = tsaColor(tsa);
       const area = _approxAreaDeg(tsa.polygon);
       // Relleno por el slider (default 0.40); áreas enormes algo más
-      // translúcidas para no tapar el mapa. Trazo grueso y opaco para que
-      // resalte sobre la imagen de satélite.
+      // translúcidas. Trazo grueso y opaco para resaltar sobre el satélite.
       const fill = area > 6 ? Math.min(tsaOpacity, 0.20) : tsaOpacity;
-      const poly = L.polygon(tsa.polygon, {
-        color, weight: 2.5, opacity: 1,
-        fillColor: color,
-        fillOpacity: fill,
-        pane: 'tsaPane',
-      });
-      // En lugar de un popup por poligono (que esconde los solapados),
-      // al click recopilamos TODAS las TSAs cuyo poligono contiene el
-      // punto y abrimos un popup combinado.
-      poly.on('click', e => {
-        const latlon = [e.latlng.lat, e.latlng.lng];
-        const containing = tsaList.filter(t => pointInPoly(latlon, t.polygon));
-        if (!containing.length) return;
-        L.popup({ maxWidth: 520, minWidth: 280, autoPan: true })
-          .setLatLng(e.latlng)
-          .setContent(buildCombinedPopup(containing))
-          .openOn(map);
-      });
-      poly.bindTooltip(tsa.name, { direction: 'center', className: 'tsa-tooltip' });
-      poly.addTo(layerGroup);
+      // Cada PARTE (MultiPolygon) se dibuja por separado: dibujarlas como un
+      // único polígono concatenado generaba líneas que unían zonas separadas.
+      for (const ring of rings) {
+        if (!ring || ring.length < 3) continue;
+        const poly = L.polygon(ring, {
+          color, weight: 2.5, opacity: 1,
+          fillColor: color,
+          fillOpacity: fill,
+          pane: 'tsaPane',
+        });
+        poly.on('click', onClick);
+        poly.bindTooltip(tsa.name, { direction: 'center', className: 'tsa-tooltip' });
+        poly.addTo(layerGroup);
+      }
     }
     // NOTA: NO autocentramos aquí. Hacerlo en cada render provocaba un bucle
     // moveend → recarga foreign → render → fitBounds → moveend que recentraba
