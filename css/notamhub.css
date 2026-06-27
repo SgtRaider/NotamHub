@@ -389,6 +389,13 @@
   border: 1px solid rgba(100,116,139,.45); border-radius: var(--r-pill);
   padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
 }
+.tsa-row.is-firwide > td { opacity: 0.85; }
+.badge-firwide {
+  display: inline-block;
+  background: var(--nh-accent-soft); color: var(--accent);
+  border: 1px solid var(--nh-accent-bd); border-radius: var(--r-pill);
+  padding: 0 6px; font-size: 9px; font-weight: 700; white-space: nowrap;
+}
 
 /* ════════════════════════════════════════════════════════════════
    6. Ordenación por columnas + buscador + chips de categoría

@@ -106,7 +106,8 @@
       tr.dataset.uid = t._uid;
       tr.className = 'tsa-row';
       if (t._largeCircle) tr.classList.add('is-largecircle');
-      if (t._noGeometry) tr.classList.add('is-nogeo');
+      if (t._firWide) tr.classList.add('is-firwide');
+      else if (t._noGeometry) tr.classList.add('is-nogeo');
       const inFilter = f && f.matches ? safeMatches(f, t) : true;
       if (!inFilter) tr.classList.add('out-of-filter');
       const checked = state.selected.has(t._uid) ? 'checked' : '';
@@ -120,9 +121,11 @@
       const lcNote = t._largeCircle
         ? ' <span class="badge badge-lc" title="Radio &gt; 75 NM: oculto del mapa por defecto">⊘ ' + radNm + ' NM</span>'
         : '';
-      const geomNote = t._noGeometry
-        ? ' <span class="badge badge-nogeo" title="Sin geometría: el API no da coordenadas dibujables">sin geo</span>'
-        : '';
+      const geomNote = t._firWide
+        ? ' <span class="badge badge-firwide" title="El NOTAM aplica a todo el FIR (sin área concreta)">FIR completo</span>'
+        : (t._noGeometry
+          ? ' <span class="badge badge-nogeo" title="Sin geometría: el API no da coordenadas dibujables">sin geo</span>'
+          : '');
       const origin = t._foreign
         ? (esc(t.fir || t.country || 'Ext.') + catBadgeHTML(t))
         : 'Nacional';
@@ -474,7 +477,7 @@
     const nh = notamHub();
     const counts = new Map();
     allItems().forEach((t) => {
-      if (!t.category || t._noGeometry) return;
+      if (!t.category) return;
       const k = t.category;
       counts.set(k, (counts.get(k) || 0) + 1);
     });
@@ -511,7 +514,6 @@
     if (!host) return;
     const counts = new Map();
     allItems().forEach((t) => {
-      if (t._noGeometry) return;        // los sin geometría no se plotean
       const fir = firOf(t);
       counts.set(fir, (counts.get(fir) || 0) + 1);
     });

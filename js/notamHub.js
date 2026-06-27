@@ -788,6 +788,9 @@ window.NotamHub.notamHub = (function () {
   // Las interpretamos como UTC (añadimos 'Z' si no traen indicador de zona).
   const FAR_PAST   = new Date(Date.UTC(2000, 0, 1));
   const FAR_FUTURE = new Date(Date.UTC(2099, 11, 31, 23, 59));
+  // Radio (NM) a partir del cual un "círculo" se considera FIR-completo
+  // (sentinela tipo 628/999 NM): no se dibuja, solo se lista.
+  const FIRWIDE_NM = 150;
   function _toUTCDate(v, fallback) {
     if (!v) return fallback || null;
     let s = v;
@@ -877,22 +880,27 @@ window.NotamHub.notamHub = (function () {
       // Geometría dibujable: Polygon/MultiPolygon, o círculo (solo si
       // geometry_type==='circle' con centro+radio). 'none'/'point'/'line' NO
       // producen área dibujable -> se listan sin plotear.
+      const radiusNm = Number.isFinite(n.radius_nm) ? n.radius_nm : null;
+      // "FIR completo": círculo con radio gigante (sentinela ~628/999 NM) =
+      // el NOTAM aplica a todo el FIR, sin área concreta. NO se dibuja (un
+      // círculo enorme taparía el mapa); se lista como NOTAM informativo.
+      const firWide = (n.geometry_type === 'circle') && radiusNm != null && radiusNm >= FIRWIDE_NM;
       let polygon = null;
-      if (n.geometry && (n.geometry.type === 'Polygon' || n.geometry.type === 'MultiPolygon')) {
-        polygon = geojsonToLatLngArray(n.geometry);
-      }
-      if ((!polygon || polygon.length < 3) && n.geometry_type === 'circle' &&
-          Number.isFinite(n.center_lat) && Number.isFinite(n.center_lon) && Number.isFinite(n.radius_nm)) {
-        polygon = circleToPolygon(n.center_lat, n.center_lon, n.radius_nm);
+      if (!firWide) {
+        if (n.geometry && (n.geometry.type === 'Polygon' || n.geometry.type === 'MultiPolygon')) {
+          polygon = geojsonToLatLngArray(n.geometry);
+        }
+        if ((!polygon || polygon.length < 3) && n.geometry_type === 'circle' &&
+            Number.isFinite(n.center_lat) && Number.isFinite(n.center_lon) && Number.isFinite(n.radius_nm)) {
+          polygon = circleToPolygon(n.center_lat, n.center_lon, n.radius_nm);
+        }
       }
       const hasGeom = !!(polygon && polygon.length >= 3);
 
-      const radiusNm = Number.isFinite(n.radius_nm) ? n.radius_nm : null;
       const effR = hasGeom ? _polyEffRadiusNm(polygon) : null;
-      // SOLO se ocultan CÍRCULOS reales (geometry_type === 'circle') con radio
-      // > 75 NM. Los polígonos NO se ocultan aunque su radio efectivo sea
-      // grande (un polígono no es un círculo).
-      const isLargeCircle = (n.geometry_type === 'circle') && radiusNm != null && radiusNm > 75;
+      // Círculo real grande (75–150 NM): oculto del mapa por defecto, pero
+      // dibujable si el usuario lo activa.
+      const isLargeCircle = (n.geometry_type === 'circle') && radiusNm != null && radiusNm > 75 && radiusNm < FIRWIDE_NM;
       if (hasGeom) withGeom++; else noGeom++;
       if (hasGeom && isLargeCircle) large++;
 
@@ -933,6 +941,7 @@ window.NotamHub.notamHub = (function () {
         _circleRadiusNm: radiusNm,
         _effRadiusNm: effR != null ? Math.round(effR) : null,
         _noGeometry: !hasGeom,
+        _firWide: firWide,
         _largeCircle: hasGeom && isLargeCircle,
         _foreign: true,
         country: n.country,
@@ -1044,22 +1053,24 @@ window.NotamHub.notamHub = (function () {
       if (!n) continue;
       const geo = parseSpanishNotamGeometry(n.body);
       if (!geo) { skipped++; continue; }
-      let polygon = null, isCircle = false, radiusNm = null;
+      let polygon = null, isCircle = false, radiusNm = null, firWide = false;
       if (geo.kind === 'circle') {
-        polygon = circleToPolygon(geo.center[0], geo.center[1], geo.radiusNm);
         isCircle = true; radiusNm = geo.radiusNm;
+        if (radiusNm >= FIRWIDE_NM) firWide = true;                 // FIR completo: no se dibuja
+        else polygon = circleToPolygon(geo.center[0], geo.center[1], geo.radiusNm);
       } else if (geo.kind === 'poly') {
         polygon = geo.polygon;
       }
-      if (!polygon || polygon.length < 3) { skipped++; continue; }
-      withGeom++;
+      const hasGeom = !!(polygon && polygon.length >= 3);
+      if (!hasGeom && !firWide) { skipped++; continue; }            // sin geometría útil -> omitir
+      if (hasGeom) withGeom++;
       const validFrom = _toUTCDate(n.valid_from), validTo = _toUTCDate(n.valid_to);
       out.push({
         id: 'NN_' + (n.notam_id || ('idx' + out.length)),
         name: (n.notam_id || '') + (n.area ? ' · ' + n.area : (n.aerodrome ? ' · ' + n.aerodrome : '')),
         format: 'NOTAM',
-        polygon: polygon,
-        centroid: polygonCentroid(polygon),
+        polygon: hasGeom ? polygon : null,
+        centroid: hasGeom ? polygonCentroid(polygon) : null,
         vertical: { lowerFt: 0, upperFt: 99999, lowerLabel: 'GND', upperLabel: 'UNL' },
         schedules: [{ startUTC: validFrom || FAR_PAST, endUTC: validTo || FAR_FUTURE, raw: '' }],
         validFrom: validFrom, validTo: validTo,
@@ -1074,8 +1085,9 @@ window.NotamHub.notamHub = (function () {
         _isEstimate: !!n.is_estimate,
         _isCircle: isCircle,
         _circleRadiusNm: radiusNm != null ? Math.round(radiusNm * 10) / 10 : null,
-        _noGeometry: false,
-        _largeCircle: isCircle && radiusNm != null && radiusNm > 75,
+        _noGeometry: !hasGeom,
+        _firWide: firWide,
+        _largeCircle: hasGeom && isCircle && radiusNm != null && radiusNm > 75 && radiusNm < FIRWIDE_NM,
         _foreign: false,
         _national: true,
         country: 'ES',
