@@ -1654,26 +1654,77 @@ window.NotamHub.mapView = (function () {
     return 'rgba(' + parseInt(m[1], 16) + ',' + parseInt(m[2], 16) + ',' + parseInt(m[3], 16) + ',' + a + ')';
   }
 
-  // Centroide (ponderado por área) de un anillo [[lat,lon],…]; cae al
-  // promedio de vértices si el área es ~0.
-  function _ringCentroid(ring) {
+  // ── Geometría en PÍXELES (para colocar etiquetas fuera de las áreas) ──
+  // Todas operan sobre puntos [x, y] en coordenadas de canvas.
+  function _segInt(p1, p2, p3, p4) {
+    const ccw = (a, b, c) => (c[1] - a[1]) * (b[0] - a[0]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const d1 = ccw(p3, p4, p1), d2 = ccw(p3, p4, p2), d3 = ccw(p1, p2, p3), d4 = ccw(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
+  function _pip(pt, ring) {                       // punto en polígono (px)
+    let inside = false; const x = pt[0], y = pt[1];
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  function _rectPolyHit(rect, ring) {             // ¿el rectángulo solapa el polígono?
+    const { x, y, w, h } = rect;
+    const corners = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+    for (const c of corners) if (_pip(c, ring)) return true;
+    for (const v of ring) if (v[0] >= x && v[0] <= x + w && v[1] >= y && v[1] <= y + h) return true;
+    const re = [[corners[0], corners[1]], [corners[1], corners[2]], [corners[2], corners[3]], [corners[3], corners[0]]];
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      for (const e of re) if (_segInt(ring[j], ring[i], e[0], e[1])) return true;
+    }
+    return false;
+  }
+  function _segPolyHit(a, b, ring) {              // ¿el segmento toca el polígono?
+    if (_pip(a, ring) || _pip(b, ring)) return true;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      if (_segInt(a, b, ring[j], ring[i])) return true;
+    }
+    return false;
+  }
+  function _nearestOnSeg(p, a, b) {
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len2 = dx * dx + dy * dy || 1e-9;
+    let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return [a[0] + t * dx, a[1] + t * dy];
+  }
+  function _nearestOnRings(p, rings) {            // punto del borde más cercano a p
+    let best = null, bd = Infinity;
+    for (const ring of rings) {
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const q = _nearestOnSeg(p, ring[j], ring[i]);
+        const d = (q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1]);
+        if (d < bd) { bd = d; best = q; }
+      }
+    }
+    return best;
+  }
+  function _nearestRectPointTo(rect, p) {         // punto del rect más cercano a p
+    return [Math.max(rect.x, Math.min(p[0], rect.x + rect.w)),
+            Math.max(rect.y, Math.min(p[1], rect.y + rect.h))];
+  }
+  function _screenArea(ring) {
+    let a = 0;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+    return Math.abs(a / 2);
+  }
+  function _screenCentroid(ring) {
     let a = 0, cx = 0, cy = 0;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const xi = ring[i][1], yi = ring[i][0], xj = ring[j][1], yj = ring[j][0];
-      const f = xi * yj - xj * yi; a += f; cx += (xi + xj) * f; cy += (yi + yj) * f;
+      const f = ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1];
+      a += f; cx += (ring[j][0] + ring[i][0]) * f; cy += (ring[j][1] + ring[i][1]) * f;
     }
     if (Math.abs(a) < 1e-9) {
-      let sx = 0, sy = 0; ring.forEach((p) => { sx += p[1]; sy += p[0]; });
-      return [sy / ring.length, sx / ring.length];
+      let sx = 0, sy = 0; ring.forEach((p) => { sx += p[0]; sy += p[1]; });
+      return [sx / ring.length, sy / ring.length];
     }
-    a *= 0.5;
-    return [cy / (6 * a), cx / (6 * a)];  // [lat, lon]
-  }
-
-  function _largestRing(rings) {
-    let best = null, bestA = -1;
-    for (const r of rings) { const A = _approxAreaDeg(r); if (A > bestA) { bestA = A; best = r; } }
-    return best;
+    a *= 0.5; return [cx / (6 * a), cy / (6 * a)];
   }
 
   function _roundRect(ctx, x, y, w, h, r) {
@@ -1708,61 +1759,202 @@ window.NotamHub.mapView = (function () {
     ctx.restore();
   }
 
-  // Dibuja una etiqueta (TAG) con el nombre encima de cada NOTAM, con
-  // anti-solape voraz (empuja hacia abajo si choca con otra ya colocada).
+  // Calcula la colocación de las etiquetas: cada TAG se sitúa FUERA de todas
+  // las áreas (no tapa ningún polígono NOTAM) y FUERA de las demás etiquetas;
+  // el conector (leader) va del borde de la caja al punto del borde del área
+  // más cercano, SIN cruzar otras áreas. Devuelve la lista de etiquetas
+  // resueltas con su rect, ancla (punto del área) y arranque del leader.
+  //   measure(texto) -> ancho en px (ctx.measureText).
+  const _LABEL = { padX: 6, h: 21, gap: 8 };
+  function _computeLabelLayout(m, items, W, H, measure) {
+    const MARGIN = 3;
+    // Proyecta cada item a anillos en píxeles.
+    const entries = [];
+    for (const t of (items || [])) {
+      const rings = _ringsOf(t);
+      if (!rings.length) continue;
+      const sr = [];
+      for (const ring of rings) {
+        if (!ring || ring.length < 3) continue;
+        sr.push(ring.map((p) => { const q = m.latLngToContainerPoint([p[0], p[1]]); return [q.x, q.y]; }));
+      }
+      if (!sr.length) continue;
+      const label = String(t.name || t.id || '').trim();
+      if (!label) continue;
+      const largest = sr.reduce((a, b) => (_screenArea(b) > _screenArea(a) ? b : a), sr[0]);
+      entries.push({ rings: sr, label, center: _screenCentroid(largest), area: _screenArea(largest), color: tsaColor(t) });
+    }
+    const allRings = [];
+    entries.forEach((e, ei) => e.rings.forEach((r) => allRings.push({ ring: r, owner: ei })));
+
+    const angles = [];
+    for (let k = 0; k < 24; k++) angles.push((k / 24) * 2 * Math.PI);
+    const dists = [4, 12, 22, 34, 48, 64, 82, 102, 126, 154, 188, 228, 276];
+
+    const placed = [];                     // rects de etiquetas ya colocadas
+    const results = new Array(entries.length).fill(null);
+    // Áreas grandes primero: fijan su etiqueta cerca antes de que las
+    // pequeñas ocupen el hueco.
+    const order = entries.map((e, i) => i).sort((a, b) => entries[b].area - entries[a].area);
+
+    for (const ei of order) {
+      const e = entries[ei];
+      const bw = measure(e.label) + _LABEL.padX * 2, bh = _LABEL.h;
+      // Radio aproximado del área (para arrancar fuera de ella).
+      let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      e.rings.forEach((r) => r.forEach((p) => {
+        if (p[0] < bx0) bx0 = p[0]; if (p[1] < by0) by0 = p[1];
+        if (p[0] > bx1) bx1 = p[0]; if (p[1] > by1) by1 = p[1];
+      }));
+      const halfDiag = 0.5 * Math.hypot(bx1 - bx0, by1 - by0);
+      let chosen = null;
+      for (const dd of dists) {
+        const dist = halfDiag + _LABEL.gap + dd + bh / 2;
+        let best = null, bestScore = Infinity;
+        for (const ang of angles) {
+          const cx = e.center[0] + Math.cos(ang) * dist;
+          const cy = e.center[1] + Math.sin(ang) * dist;
+          const rect = { x: cx - bw / 2, y: cy - bh / 2, w: bw, h: bh };
+          // Dentro del canvas.
+          if (rect.x < MARGIN || rect.y < MARGIN || rect.x + bw > W - MARGIN || rect.y + bh > H - MARGIN) continue;
+          // No solapa NINGÚN área.
+          let bad = false;
+          for (const o of allRings) { if (_rectPolyHit(rect, o.ring)) { bad = true; break; } }
+          if (bad) continue;
+          // No solapa otra etiqueta ya colocada.
+          for (const pr of placed) {
+            if (!(rect.x + bw < pr.x || rect.x > pr.x + pr.w || rect.y + bh < pr.y || rect.y > pr.y + pr.h)) { bad = true; break; }
+          }
+          if (bad) continue;
+          // Ancla = borde del área propia más cercano; leader = desde el borde
+          // de la caja a ese ancla. Debe NO cruzar ninguna OTRA área.
+          const anchor = _nearestOnRings([cx, cy], e.rings);
+          if (!anchor) continue;
+          const ls = _nearestRectPointTo(rect, anchor);
+          for (const o of allRings) {
+            if (o.owner === ei) continue;
+            if (_segPolyHit(ls, anchor, o.ring)) { bad = true; break; }
+          }
+          if (bad) continue;
+          const score = Math.hypot(ls[0] - anchor[0], ls[1] - anchor[1]);   // leader corto = mejor
+          if (score < bestScore) { bestScore = score; best = { rect, anchor, ls }; }
+        }
+        if (best) { chosen = best; break; }
+      }
+      if (!chosen) {
+        // Fallback (muy denso): coloca encima del bbox, recortado al canvas.
+        const rx = Math.max(MARGIN, Math.min(e.center[0] - bw / 2, W - MARGIN - bw));
+        const ry = Math.max(MARGIN, Math.min(by0 - _LABEL.gap - bh, H - MARGIN - bh));
+        const rect = { x: rx, y: ry, w: bw, h: bh };
+        const anchor = _nearestOnRings([rect.x + bw / 2, rect.y + bh / 2], e.rings) || e.center;
+        chosen = { rect, anchor, ls: _nearestRectPointTo(rect, anchor), fallback: true };
+      }
+      placed.push(chosen.rect);
+      results[ei] = {
+        label: e.label, color: e.color, owner: ei,
+        rect: chosen.rect, anchor: chosen.anchor, leaderStart: chosen.ls, fallback: !!chosen.fallback,
+      };
+    }
+    return { labels: results.filter(Boolean), allRings };
+  }
+
+  // Flecha: punta (tip) en el borde del área apuntando HACIA dentro; el
+  // cuerpo queda FUERA del área (no la tapa).
+  function _drawArrowHead(ctx, from, to, color) {
+    const ang = Math.atan2(to[1] - from[1], to[0] - from[0]);
+    const len = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    const size = Math.max(5, Math.min(10, len - 1));
+    const a1 = [to[0] - size * Math.cos(ang - 0.45), to[1] - size * Math.sin(ang - 0.45)];
+    const a2 = [to[0] - size * Math.cos(ang + 0.45), to[1] - size * Math.sin(ang + 0.45)];
+    ctx.beginPath(); ctx.moveTo(to[0], to[1]); ctx.lineTo(a1[0], a1[1]); ctx.lineTo(a2[0], a2[1]); ctx.closePath();
+    ctx.fillStyle = color; ctx.fill();
+    ctx.lineWidth = 1.1; ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.stroke();
+  }
+
+  // Dibuja las etiquetas (TAG) según el layout calculado: leader con realce
+  // blanco + flecha apuntando al área + caja con el nombre.
   function _drawLabels(ctx, m, items, W, H) {
     ctx.save();
     ctx.font = '600 14px system-ui, "Segoe UI", Arial, sans-serif';
     ctx.textBaseline = 'middle';
-    const placed = [];
-    const overlaps = (r) => placed.some((p) =>
-      !(r.x + r.w < p.x || r.x > p.x + p.w || r.y + r.h < p.y || r.y > p.y + p.h));
-    // Áreas grandes primero (etiqueta cerca de su centro antes de que las
-    // pequeñas ocupen el espacio).
-    const withRings = (items || []).filter((t) => _ringsOf(t).length)
-      .sort((a, b) => _approxAreaDeg(_largestRing(_ringsOf(b)) || []) - _approxAreaDeg(_largestRing(_ringsOf(a)) || []));
-    for (const t of withRings) {
-      const ring = _largestRing(_ringsOf(t));
-      if (!ring || ring.length < 3) continue;
-      const c = _ringCentroid(ring);
-      const pc = m.latLngToContainerPoint([c[0], c[1]]);
-      const x = pc.x, y = pc.y;
-      if (x < -60 || x > W + 60 || y < -60 || y > H + 60) continue;
-      const label = String(t.name || t.id || '').trim();
-      if (!label) continue;
-      const color = tsaColor(t);
-      const padX = 5, bh = 20;
-      const tw = ctx.measureText(label).width;
-      const bw = tw + padX * 2;
-      const rect = {
-        x: Math.min(Math.max(2, x - bw / 2), W - bw - 2),
-        y: Math.min(Math.max(2, y - bh / 2), H - bh - 2),
-        w: bw, h: bh,
-      };
-      let tries = 0;
-      while (overlaps(rect) && tries < 60) {
-        rect.y += bh + 2;
-        if (rect.y > H - bh - 2) { rect.y = 2; rect.x = Math.min(rect.x + bw * 0.55, W - bw - 2); }
-        tries++;
-      }
-      placed.push({ x: rect.x, y: rect.y, w: rect.w, h: rect.h });
-      // Línea guía centroide -> etiqueta.
-      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(rect.x + bw / 2, rect.y + bh / 2);
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 1; ctx.stroke();
-      // Punto en el centroide.
-      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-      ctx.fillStyle = color; ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.2; ctx.stroke();
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    const layout = _computeLabelLayout(m, items, W, H, (s) => ctx.measureText(s).width);
+    for (const L of layout.labels) {
+      const r = L.rect, anchor = L.anchor, ls = L.leaderStart, color = L.color;
+      // Leader: realce blanco debajo + línea de color encima (visible sobre satélite).
+      ctx.beginPath(); ctx.moveTo(ls[0], ls[1]); ctx.lineTo(anchor[0], anchor[1]);
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 4; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(ls[0], ls[1]); ctx.lineTo(anchor[0], anchor[1]);
+      ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.stroke();
+      _drawArrowHead(ctx, ls, anchor, color);
       // Caja.
-      _roundRect(ctx, rect.x, rect.y, bw, bh, 4);
-      ctx.fillStyle = 'rgba(255,255,255,0.93)'; ctx.fill();
+      _roundRect(ctx, r.x, r.y, r.w, r.h, 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fill();
       ctx.lineWidth = 1.5; ctx.strokeStyle = color;
-      _roundRect(ctx, rect.x, rect.y, bw, bh, 4); ctx.stroke();
+      _roundRect(ctx, r.x, r.y, r.w, r.h, 4); ctx.stroke();
       // Texto.
       ctx.fillStyle = '#0f172a';
-      ctx.fillText(label, rect.x + padX, rect.y + bh / 2 + 0.5);
+      ctx.fillText(L.label, r.x + _LABEL.padX, r.y + r.h / 2 + 0.5);
     }
     ctx.restore();
+  }
+
+  // Crea un mapa Leaflet OFFSCREEN del tamaño dado y lo encuadra a los items.
+  // No añade tiles (lo hace quien lo necesite). Devuelve { host, m }.
+  function _newExportMap(items, W, H, opts) {
+    opts = opts || {};
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-100000px;top:0;width:' + W + 'px;height:' + H +
+      'px;background:' + SEA_COLOR + ';';
+    document.body.appendChild(host);
+    const m = L.map(host, {
+      zoomControl: false, attributionControl: false,
+      fadeAnimation: false, zoomAnimation: false,
+      markerZoomAnimation: false, preferCanvas: false,
+    });
+    const pts = [];
+    (items || []).forEach((t) => { _ringsOf(t).forEach((r) => { if (r) r.forEach((p) => pts.push(p)); }); });
+    if (pts.length) {
+      try { m.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: opts.maxZoom || 11 }); }
+      catch (_) { m.setView([40, -4], 5); }
+    } else {
+      m.fitBounds(DEFAULT_BOUNDS);
+    }
+    return { host, m };
+  }
+
+  // TEST/diagnóstico: calcula el layout de etiquetas y devuelve métricas de
+  // calidad (cuántas TAGs tapan un área, leaders que cruzan otra área,
+  // etiquetas fuera del canvas, solapes entre etiquetas, fallbacks). Sin
+  // tiles ni dibujado. Usado por la suite de validación headless.
+  async function _auditLabelLayout(items, W, H, opts) {
+    W = W || 1240; H = H || 900;
+    const { host, m } = _newExportMap(items, W, H, opts);
+    let res = null;
+    try {
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = '600 14px system-ui, "Segoe UI", Arial, sans-serif';
+      const layout = _computeLabelLayout(m, items, W, H, (s) => ctx.measureText(s).width);
+      const labels = layout.labels, allRings = layout.allRings;
+      let labelOverArea = 0, leaderOverArea = 0, offCanvas = 0, labelOverlap = 0, fallbacks = 0;
+      for (const Lb of labels) {
+        if (Lb.fallback) fallbacks++;
+        if (allRings.some((o) => _rectPolyHit(Lb.rect, o.ring))) labelOverArea++;
+        if (allRings.some((o) => o.owner !== Lb.owner && _segPolyHit(Lb.leaderStart, Lb.anchor, o.ring))) leaderOverArea++;
+        if (Lb.rect.x < 0 || Lb.rect.y < 0 || Lb.rect.x + Lb.rect.w > W || Lb.rect.y + Lb.rect.h > H) offCanvas++;
+      }
+      for (let i = 0; i < labels.length; i++) {
+        for (let j = i + 1; j < labels.length; j++) {
+          const a = labels[i].rect, b = labels[j].rect;
+          if (!(a.x + a.w < b.x || a.x > b.x + b.w || a.y + a.h < b.y || a.y > b.y + b.h)) labelOverlap++;
+        }
+      }
+      res = { n: labels.length, labelOverArea, leaderOverArea, offCanvas, labelOverlap, fallbacks };
+    } finally {
+      try { m.remove(); } catch (_) {}
+      try { host.remove(); } catch (_) {}
+    }
+    return res;
   }
 
   // Captura el mapa satélite (con polígonos NOTAM + etiquetas) a un dataURL.
@@ -1772,30 +1964,14 @@ window.NotamHub.mapView = (function () {
     opts = opts || {};
     const W = opts.width || 1240, H = opts.height || 900;
     const useStreet = !!(map && _baseStreet && map.hasLayer(_baseStreet));
-    const host = document.createElement('div');
-    host.style.cssText = 'position:absolute;left:-100000px;top:0;width:' + W + 'px;height:' + H +
-      'px;background:' + SEA_COLOR + ';';
-    document.body.appendChild(host);
-    let m = null, dataUrl = null;
+    const built = _newExportMap(items, W, H, opts);
+    const host = built.host;
+    let m = built.m, dataUrl = null;
     try {
-      m = L.map(host, {
-        zoomControl: false, attributionControl: false,
-        fadeAnimation: false, zoomAnimation: false,
-        markerZoomAnimation: false, preferCanvas: false,
-      });
       const url = useStreet
         ? 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
         : 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
       L.tileLayer(url, { crossOrigin: 'anonymous', maxZoom: 19 }).addTo(m);
-
-      const pts = [];
-      (items || []).forEach((t) => { _ringsOf(t).forEach((r) => { if (r) r.forEach((p) => pts.push(p)); }); });
-      if (pts.length) {
-        try { m.fitBounds(L.latLngBounds(pts), { padding: [50, 50], maxZoom: opts.maxZoom || 11 }); }
-        catch (_) { m.setView([40, -4], 5); }
-      } else {
-        m.fitBounds(DEFAULT_BOUNDS);
-      }
       await _waitTiles(host, 9000);
 
       const canvas = document.createElement('canvas');
@@ -1857,7 +2033,7 @@ window.NotamHub.mapView = (function () {
   return {
     init, render, fitBounds, invalidateSize, fitToDefault,
     setWeatherMarkers, clearWeatherMarkers,
-    captureForPdf,
+    captureForPdf, _auditLabelLayout,
     applyOpacities,
     setLegendVisible, updateLegend, isLegendVisible,
     setLayersControlVisible, isLayersControlVisible,
