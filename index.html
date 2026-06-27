@@ -142,13 +142,6 @@
               mapa.</div>
           </div>
           <div class="feature">
-            <div class="feature-title">Briefing meteo del aeródromo</div>
-            <div class="feature-desc">Tablero <b>Weather Hold</b>: clasifica
-              METAR/TAF frente a tus mínimos (techo, visibilidad, viento) en
-              verde / amarillo / rojo, junto a la lista de NOTAMs operativos del
-              aeródromo con detección de cierres.</div>
-          </div>
-          <div class="feature">
             <div class="feature-title">PWA instalable</div>
             <div class="feature-desc">App instalable que funciona offline tras la
               primera carga (Service Worker). Interfaz adaptable a escritorio y
@@ -165,8 +158,8 @@
 
       <div class="home-cta">
         <p class="hint">Empieza en <b>Datos</b> para descargar las TSAs y NOTAMs
-          activos; consúltalos sobre el mapa y revisa el aeródromo en
-          <b>Briefing</b>.</p>
+          activos (nacionales y de FIRs colindantes) y consúltalos sobre el mapa
+          satélite, con filtros por tipo y por FIR.</p>
       </div>
     </section>
 
@@ -252,41 +245,6 @@
       <div id="map"></div>
     </section>
 
-    <!-- BRIEFING / NOTAMs del aeródromo + Weather Hold -->
-    <section id="tab-notams" class="tab-content">
-      <div class="notam-toolbar-card">
-        <div class="notam-toolbar-row">
-          <label class="notam-input-label">
-            <span>Aeródromos <span class="dim">(ICAO, separados por espacio)</span></span>
-            <input type="text" id="notam-icaos" placeholder="LEMD LEBL" autocomplete="off" spellcheck="false">
-          </label>
-          <div class="notam-toolbar-buttons">
-            <button id="btn-notam-load" class="btn btn-primary" type="button">🔍 Consultar</button>
-          </div>
-        </div>
-        <div id="notam-status" class="status notam-status-bar"></div>
-      </div>
-
-      <section class="notam-section">
-        <header class="notam-section-header">
-          <h2 class="notam-section-title"><span class="notam-section-icon">⛅</span> Weather Hold</h2>
-          <p class="notam-section-sub">METAR / TAF vs mínimos configurados en <b>Ajustes → Mínimos meteorológicos</b>.
-            <span class="legend-pill legend-pill-green">Verde · sin limitaciones</span>
-            <span class="legend-pill legend-pill-yellow">Amarillo · marginal</span>
-            <span class="legend-pill legend-pill-red">Rojo · no go</span></p>
-        </header>
-        <div id="notam-wx-board"></div>
-      </section>
-
-      <section class="notam-section">
-        <header class="notam-section-header">
-          <h2 class="notam-section-title"><span class="notam-section-icon">📋</span> NOTAMs del aeródromo</h2>
-          <p class="notam-section-sub">NOTAMs operativos publicados para los aeródromos consultados. <span class="dim">Apartados de áreas / espacio aéreo segregado omitidos automáticamente.</span> Fuente: <b>NotamHub</b>.</p>
-        </header>
-        <div id="notam-results"></div>
-      </section>
-    </section>
-
     <!-- AJUSTES -->
     <section id="tab-settings" class="tab-content">
 
@@ -333,32 +291,6 @@
       </div>
 
       <div class="settings-card">
-        <h3>Mínimos meteorológicos (Weather Hold)</h3>
-        <p class="hint">Umbrales que el <b>Briefing</b> usa para clasificar METAR/TAF del aeródromo en verde / amarillo / rojo.
-          <b>Hard</b> = límite absoluto (rojo, no-go). <b>Marginal</b> = a partir de aquí amarillo.</p>
-        <div class="settings-fields">
-          <label>Techo HARD (ft AGL)
-            <input type="number" data-setting="wxLimits.ceilingHardFt" min="0" step="100">
-          </label>
-          <label>Techo MARGINAL (ft AGL)
-            <input type="number" data-setting="wxLimits.ceilingMarginalFt" min="0" step="100">
-          </label>
-          <label>Visibilidad HARD (m)
-            <input type="number" data-setting="wxLimits.visibilityHardM" min="0" step="100">
-          </label>
-          <label>Visibilidad MARGINAL (m)
-            <input type="number" data-setting="wxLimits.visibilityMarginalM" min="0" step="100">
-          </label>
-          <label>Viento HARD (kt)
-            <input type="number" data-setting="wxLimits.windHardKt" min="0" step="1">
-          </label>
-          <label>Viento MARGINAL (kt)
-            <input type="number" data-setting="wxLimits.windMarginalKt" min="0" step="1">
-          </label>
-        </div>
-      </div>
-
-      <div class="settings-card">
         <h3 data-i18n="set.lang">Idioma</h3>
         <p class="hint">Cambio en caliente sin recargar. Cobertura parcial — los strings más visibles se traducen.</p>
         <div class="settings-actions">
@@ -394,7 +326,6 @@
 <script src="js/metarDecode.js"></script>
 <script src="js/meteoApi.js"></script>
 <script src="js/notamHub.js"></script>
-<script src="js/notamView.js"></script>
 <script src="js/mapView.js"></script>
 <script src="js/app.js"></script>
 <script src="js/shell.js"></script>

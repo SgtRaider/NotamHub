@@ -35,7 +35,6 @@
     { id: 'datos',    icon: ICONS.data,     label: 'Datos',    tabId: 'tab-upload',   drawer: [
       { id: 'tsa-table-wrap', label: 'NOTAMs / TSAs cargadas' },
     ]},
-    { id: 'briefing', icon: ICONS.briefing, label: 'Briefing', tabId: 'tab-notams',   drawer: [] },
     { id: 'settings', icon: ICONS.settings, label: 'Ajustes',  tabId: 'tab-settings', drawer: [] },
   ];
 

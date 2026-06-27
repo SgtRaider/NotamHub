@@ -162,6 +162,8 @@ window.NotamHub.mapView = (function () {
       + ' waypoints:' + _wpItems.filter(i => i.group.hasLayer(i.marker)).length + '/' + _wpItems.length);
   }
 
+  let _baseSat = null, _baseStreet = null;
+
   function init(elId) {
     if (map) {
       window._tsa_leaflet_map = map;
@@ -171,20 +173,26 @@ window.NotamHub.mapView = (function () {
       zoomControl: true,
       worldCopyJump: false,
       minZoom: 3,
-      maxZoom: 11,
-      attributionControl: false,
+      maxZoom: 18,
+      attributionControl: true,
     });
-    // Vista mínima: el contenedor todavía puede tener tamaño 0×0 antes
-    // del primer layout. El caller (switchTab) llama a fitToDefault()
-    // dentro de un setTimeout cuando el browser ya ha medido el div.
     map.setView([40, -4], 5);
 
-    // Fondo "mar" en el contenedor del mapa.
     const container = document.getElementById(elId);
     if (container) container.style.background = SEA_COLOR;
 
-    drawOfflineBackground();
-    drawGraticule();
+    // Base SATÉLITE (Esri World Imagery, sin API key) + alternativa callejero
+    // (OpenStreetMap). Se eligen desde el control de capas.
+    _baseSat = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { maxZoom: 19, attribution: 'Imagery © Esri · Maxar · Earthstar Geographics' });
+    _baseStreet = L.tileLayer(
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      { maxZoom: 19, attribution: '© OpenStreetMap contributors' });
+    _baseSat.addTo(map);
+
+    // Etiquetas de ciudades para orientación (la base offline de países y la
+    // retícula se sustituyen por la imagen de satélite).
     drawCities();
 
     layerGroup = L.layerGroup().addTo(map);
@@ -252,8 +260,11 @@ window.NotamHub.mapView = (function () {
       }
       overlays['METAR / TAF'] = buildMetarLayer();
     }
-    if (Object.keys(overlays).length === 0) return;
-    _layersControl = L.control.layers(null, overlays, { position: 'topleft', collapsed: false }).addTo(map);
+    const baseLayers = {};
+    if (_baseSat) baseLayers['Satélite (Esri)'] = _baseSat;
+    if (_baseStreet) baseLayers['Callejero (OSM)'] = _baseStreet;
+    if (Object.keys(overlays).length === 0 && Object.keys(baseLayers).length === 0) return;
+    _layersControl = L.control.layers(baseLayers, overlays, { position: 'topleft', collapsed: false }).addTo(map);
   }
 
   // Toggle del control de capas (boton "Capas" en la toolbar del mapa).
@@ -1297,14 +1308,8 @@ window.NotamHub.mapView = (function () {
     }
     const sw = (color) => `<span class="swatch" style="background:${color}"></span>`;
     const rows = [];
-    if (work || transit || natOther) {
-      rows.push('<div class="legend-sec">Nacional</div>');
-      if (work)    rows.push(sw(AREA_COLORS.work) + 'Trabajo (' + work + ')');
-      if (transit) rows.push(sw(AREA_COLORS.transit) + 'Tránsito (' + transit + ')');
-      if (natOther) rows.push(sw(BAND_COLORS.mid) + 'Otras (' + natOther + ')');
-    }
+    // Solo categorías de NOTAMs extranjeros (la leyenda "Nacional" se omite).
     if (foreignCats.size) {
-      rows.push('<div class="legend-sec">Extranjeros</div>');
       const nh = window.NotamHub.notamHub;
       Array.from(foreignCats.entries()).sort((a, b) => b[1] - a[1]).forEach(([k, c]) => {
         const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(k) : { label: k, color: FOREIGN_COLOR };
