@@ -884,8 +884,10 @@ window.NotamHub.notamHub = (function () {
       // "FIR completo": círculo con radio gigante (sentinela ~628/999 NM) =
       // el NOTAM aplica a todo el FIR, sin área concreta. NO se dibuja (un
       // círculo enorme taparía el mapa); se lista como NOTAM informativo.
-      const firWide = (n.geometry_type === 'circle') && radiusNm != null && radiusNm >= FIRWIDE_NM;
+      let firWide = (n.geometry_type === 'circle') && radiusNm != null && radiusNm >= FIRWIDE_NM;
       let polygon = null;
+      let isCircleGeom = (n.geometry_type === 'circle');
+      let circleR = isCircleGeom ? radiusNm : null;
       if (!firWide) {
         if (n.geometry && (n.geometry.type === 'Polygon' || n.geometry.type === 'MultiPolygon')) {
           polygon = geojsonToLatLngArray(n.geometry);
@@ -894,13 +896,26 @@ window.NotamHub.notamHub = (function () {
             Number.isFinite(n.center_lat) && Number.isFinite(n.center_lon) && Number.isFinite(n.radius_nm)) {
           polygon = circleToPolygon(n.center_lat, n.center_lon, n.radius_nm);
         }
+        // Fallback: el API a veces marca 'point'/'none' pero el CUERPO trae
+        // coordenadas ("WI 5NM RADIUS OF …", "WI COORD …"). Las parseamos para
+        // poder plotearlos (antes se perdían como "sin geometría").
+        if (!polygon || polygon.length < 3) {
+          const bodyGeo = parseSpanishNotamGeometry(n.body);
+          if (bodyGeo && bodyGeo.kind === 'circle') {
+            isCircleGeom = true; circleR = bodyGeo.radiusNm;
+            if (bodyGeo.radiusNm >= FIRWIDE_NM) firWide = true;
+            else polygon = circleToPolygon(bodyGeo.center[0], bodyGeo.center[1], bodyGeo.radiusNm);
+          } else if (bodyGeo && bodyGeo.kind === 'poly') {
+            polygon = bodyGeo.polygon;
+          }
+        }
       }
       const hasGeom = !!(polygon && polygon.length >= 3);
 
       const effR = hasGeom ? _polyEffRadiusNm(polygon) : null;
       // Círculo real grande (75–150 NM): oculto del mapa por defecto, pero
       // dibujable si el usuario lo activa.
-      const isLargeCircle = (n.geometry_type === 'circle') && radiusNm != null && radiusNm > 75 && radiusNm < FIRWIDE_NM;
+      const isLargeCircle = isCircleGeom && circleR != null && circleR > 75 && circleR < FIRWIDE_NM;
       if (hasGeom) withGeom++; else noGeom++;
       if (hasGeom && isLargeCircle) large++;
 
@@ -937,8 +952,8 @@ window.NotamHub.notamHub = (function () {
         _isPermanent: !!n.is_permanent,
         _isEstimate: !!n.is_estimate,
         _military: !!n.military,
-        _isCircle: n.geometry_type === 'circle',
-        _circleRadiusNm: radiusNm,
+        _isCircle: isCircleGeom,
+        _circleRadiusNm: circleR,
         _effRadiusNm: effR != null ? Math.round(effR) : null,
         _noGeometry: !hasGeom,
         _firWide: firWide,
