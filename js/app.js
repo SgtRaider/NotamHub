@@ -37,8 +37,9 @@
     at: '',
     atTo: '',
   };
-  // FIR de un item: 'ES' para nacionales, el código FIR para extranjeros.
-  function firOf(t) { return t._foreign ? (t.fir || '—') : 'ES'; }
+  // FIR de un item: su código FIR (LECM/LECB/GCCC para nacionales con NOTAM,
+  // o el FIR extranjero); 'ES' para TSAs nacionales sin FIR concreto.
+  function firOf(t) { return t.fir || (t._foreign ? '—' : 'ES'); }
 
   // ── Utilidades ────────────────────────────────────────────────────
   const $  = (sel, root) => (root || document).querySelector(sel);
@@ -69,7 +70,7 @@
     return allItems().filter((t) => {
       if (!state.selected.has(t._uid)) return false;
       if (state.firFilter && !state.firFilter.has(firOf(t))) return false;
-      if (state.catFilter && t._foreign && !state.catFilter.has(t.category)) return false;
+      if (state.catFilter && t.category && !state.catFilter.has(t.category)) return false;
       if (f && f.matches) { try { return f.matches(t, state.filter); } catch (_) { return true; } }
       return true;
     });
@@ -155,7 +156,7 @@
   // fecha/tipo se aplica aparte (atenúa filas vía .out-of-filter).
   function passesRowFilters(t) {
     if (state.firFilter && !state.firFilter.has(firOf(t))) return false;
-    if (state.catFilter && t._foreign && !state.catFilter.has(t.category)) return false;
+    if (state.catFilter && t.category && !state.catFilter.has(t.category)) return false;
     if (state.search) {
       const q = state.search.toLowerCase();
       const hay = ((t.name || '') + ' ' + (t.country || '') + ' ' + (t.fir || '') + ' ' +
@@ -273,12 +274,23 @@
         try { internal = await nh.refineWorkAreaByParentRmk(internal, params) || internal; } catch (_) {}
       }
       state.national = internal || [];
+      // NOTAMs nacionales (LECM/LECB/GCCC): el API no da geometría en campos,
+      // pero la parseamos del cuerpo del NOTAM y la añadimos a "national".
+      try {
+        if (nh.fetchNationalNotams && nh.convertNationalNotamsToInternal) {
+          const natList = await nh.fetchNationalNotams({ at: at });
+          const natInternal = nh.convertNationalNotamsToInternal(natList, at ? new Date(at) : new Date()) || [];
+          state.national = state.national.concat(natInternal);
+        }
+      } catch (e) { console.warn('[app] NOTAMs nacionales fallaron:', e); }
       // NOTAMs extranjeros (FIRs colindantes) por área visible del mapa.
       const wantForeign = $('#notamhub-foreign') && $('#notamhub-foreign').checked;
       if (wantForeign) { await loadForeign(false); }
       else { state.foreign = []; }
       assignUids();
       selectDefault();
+      rebuildFirFilter();
+      rebuildCatFilter();
       const hidden = allItems().filter((t) => t._largeCircle).length;
       setStatus(statusEl, state.national.length + ' nacionales · ' + state.foreign.length + ' extranjeras cargadas' +
         (hidden ? ' · ' + hidden + ' círculos >75 NM ocultos (visibles en la tabla)' : '') + '.', 'ok');
@@ -462,8 +474,8 @@
     const nh = notamHub();
     const counts = new Map();
     allItems().forEach((t) => {
-      if (!t._foreign || t._noGeometry) return;
-      const k = t.category || 'other';
+      if (!t.category || t._noGeometry) return;
+      const k = t.category;
       counts.set(k, (counts.get(k) || 0) + 1);
     });
     const cats = Array.from(counts.keys()).sort((a, b) => counts.get(b) - counts.get(a));

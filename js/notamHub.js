@@ -824,16 +824,17 @@ window.NotamHub.notamHub = (function () {
   // "subject" (chars 2-3) determina la naturaleza. Mapeamos a categorías
   // con etiqueta y color para el mapa/leyenda/tabla. (El keyword del API
   // viene casi siempre "INTERNATIONAL", inservible para clasificar.)
+  // Colores VIVOS y saturados para que resalten sobre la imagen de satélite.
   const FOREIGN_CATEGORY_META = {
-    restricted: { label: 'Restringida / Prohibida', color: '#ef4444' },
-    danger:     { label: 'Zona de peligro (D)',     color: '#f97316' },
-    military:   { label: 'Militar / ejercicios',    color: '#b91c1c' },
-    uas:        { label: 'UAS / drones',            color: '#ec4899' },
-    activity:   { label: 'Actividad aérea',         color: '#f59e0b' },
-    obstacle:   { label: 'Obstáculo',               color: '#a16207' },
-    navaid:     { label: 'Navegación / comms',      color: '#a855f7' },
-    airspace:   { label: 'Espacio aéreo / ATS',     color: '#14b8c4' },
-    other:      { label: 'Otros',                   color: '#94a3b8' },
+    restricted: { label: 'Restringida / Prohibida', color: '#ff3b30' },
+    danger:     { label: 'Zona de peligro (D)',     color: '#ff9500' },
+    military:   { label: 'Militar / ejercicios',    color: '#ff2d55' },
+    uas:        { label: 'UAS / drones',            color: '#ff5fd2' },
+    activity:   { label: 'Actividad aérea',         color: '#ffd60a' },
+    obstacle:   { label: 'Obstáculo',               color: '#ffae00' },
+    navaid:     { label: 'Navegación / comms',      color: '#c77dff' },
+    airspace:   { label: 'Espacio aéreo / ATS',     color: '#32d6e0' },
+    other:      { label: 'Otros',                   color: '#d6deea' },
   };
   function getForeignCategoryMeta(key) {
     return FOREIGN_CATEGORY_META[key] || FOREIGN_CATEGORY_META.other;
@@ -943,6 +944,147 @@ window.NotamHub.notamHub = (function () {
     return out;
   }
 
+  // ── NOTAMs nacionales (LECM/LECB/GCCC) ────────────────────────────
+  // El API nacional (/notams/fir) NO trae geometría en campos, pero el
+  // CUERPO suele incluir coordenadas ICAO. Las parseamos para poder
+  // dibujarlos en el mapa.
+  const NATIONAL_FIRS = ['LECM', 'LECB', 'GCCC'];
+
+  // Extrae todas las coordenadas ICAO (DDMMSS[N/S] DDDMMSS[E/W], segundos
+  // opcionales) de un texto. Devuelve [[lat,lon],…].
+  function _icaoCoordsAll(text) {
+    const re = /(\d{2})(\d{2})(\d{2})?(?:[.,]\d+)?\s*([NS])\s*(\d{3})(\d{2})(\d{2})?(?:[.,]\d+)?\s*([EW])/g;
+    const pts = [];
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const lat = (+m[1]) + (+m[2]) / 60 + (m[3] ? +m[3] : 0) / 3600;
+      const lon = (+m[5]) + (+m[6]) / 60 + (m[7] ? +m[7] : 0) / 3600;
+      pts.push([m[4] === 'S' ? -lat : lat, m[8] === 'W' ? -lon : lon]);
+    }
+    return pts;
+  }
+
+  // Parsea la geometría del cuerpo de un NOTAM español:
+  //  • polígono: ≥3 coordenadas ICAO ("WI COORD …").
+  //  • círculo: 1 coordenada + radio ("400M RADIUS OF …", "5NM RADIUS …").
+  //  • punto: 1 coordenada sin radio → círculo pequeño por defecto.
+  function parseSpanishNotamGeometry(body) {
+    if (!body) return null;
+    const text = String(body).toUpperCase();
+    const pts = _icaoCoordsAll(text);
+    let radiusNm = null;
+    const rm = text.match(/(\d+(?:[.,]\d+)?)\s*(M|KM|NM)\s+RADIUS/) ||
+               text.match(/RADIUS\s+(?:OF\s+)?(\d+(?:[.,]\d+)?)\s*(M|KM|NM)/);
+    if (rm) {
+      const v = parseFloat(rm[1].replace(',', '.'));
+      const u = rm[2];
+      radiusNm = u === 'NM' ? v : (u === 'KM' ? v / 1.852 : v / 1852);
+    }
+    if (pts.length >= 3) {
+      const poly = pts.slice();
+      const a = poly[0], b = poly[poly.length - 1];
+      if (a[0] !== b[0] || a[1] !== b[1]) poly.push(a);
+      return { kind: 'poly', polygon: poly };
+    }
+    if (pts.length >= 1 && radiusNm != null) {
+      return { kind: 'circle', center: pts[0], radiusNm: radiusNm };
+    }
+    if (pts.length === 1) {
+      return { kind: 'circle', center: pts[0], radiusNm: 0.5, point: true };
+    }
+    return null;
+  }
+
+  // Clasifica un NOTAM nacional por palabras clave del cuerpo/área.
+  function classifyNationalNotam(n) {
+    const b = ((n && n.body) || '') + ' ' + ((n && n.area) || '');
+    const s = b.toUpperCase();
+    if (/UNMANNED|\bUAS\b|RPAS|\bUAV\b|DRON/.test(s)) return 'uas';
+    if (/FIRING|\bGUN\b|MISSILE|ROCKET|EXERCISE|EJERCICIO|MILITAR|MILITARY|\bTIRO\b|ARTILLER/.test(s)) return 'military';
+    if (/PARACHUT|PARACAID|JUMP|\bSALTO/.test(s)) return 'activity';
+    if (/AEROBATIC|ACROBA|AIR\s*DISPLAY|EXHIBIC|GLIDER|PLANEAD|BALLOON|GLOBO/.test(s)) return 'activity';
+    if (/DANGER|PELIGRO|\bLED\b/.test(s)) return 'danger';
+    if (/PROHIB|RESTRICT|RESTRING|\bLER\b|\bLEP\b/.test(s)) return 'restricted';
+    if (/OBSTACLE|OBSTACUL|CRANE|\bGRUA\b|TOWER|TORRE/.test(s)) return 'obstacle';
+    return 'other';
+  }
+
+  // Descarga los NOTAMs de los FIR nacionales (sin limit — el endpoint lo
+  // ignora con valores altos). Dedup por notam_id.
+  async function fetchNationalNotams(opts) {
+    opts = opts || {};
+    const at = opts.at != null && opts.at !== '' ? opts.at : undefined;
+    const lists = await Promise.all(NATIONAL_FIRS.map((f) =>
+      fetchNotamsByFIR(f, { at: at }).catch((e) => {
+        console.warn('[notamHub] notams/fir ' + f + ' falló:', e && e.message);
+        return [];
+      })
+    ));
+    const seen = new Set();
+    const out = [];
+    for (const list of lists) {
+      for (const n of (list || [])) {
+        if (!n || !n.notam_id || seen.has(n.notam_id)) continue;
+        seen.add(n.notam_id);
+        out.push(n);
+      }
+    }
+    console.info('[notamHub] fetchNationalNotams: ' + NATIONAL_FIRS.length + ' FIRs -> ' + out.length + ' NOTAMs');
+    return out;
+  }
+
+  // Convierte NOTAMs nacionales a objetos internos dibujables. SOLO incluye
+  // los que tienen geometría parseable en el cuerpo (los operacionales sin
+  // coordenadas se omiten).
+  function convertNationalNotamsToInternal(list, atDate) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    let withGeom = 0, skipped = 0;
+    for (const n of list) {
+      if (!n) continue;
+      const geo = parseSpanishNotamGeometry(n.body);
+      if (!geo) { skipped++; continue; }
+      let polygon = null, isCircle = false, radiusNm = null;
+      if (geo.kind === 'circle') {
+        polygon = circleToPolygon(geo.center[0], geo.center[1], geo.radiusNm);
+        isCircle = true; radiusNm = geo.radiusNm;
+      } else if (geo.kind === 'poly') {
+        polygon = geo.polygon;
+      }
+      if (!polygon || polygon.length < 3) { skipped++; continue; }
+      withGeom++;
+      const validFrom = _toUTCDate(n.valid_from), validTo = _toUTCDate(n.valid_to);
+      out.push({
+        id: 'NN_' + (n.notam_id || ('idx' + out.length)),
+        name: (n.notam_id || '') + (n.area ? ' · ' + n.area : (n.aerodrome ? ' · ' + n.aerodrome : '')),
+        format: 'NOTAM',
+        polygon: polygon,
+        centroid: polygonCentroid(polygon),
+        vertical: { lowerFt: 0, upperFt: 99999, lowerLabel: 'GND', upperLabel: 'UNL' },
+        schedules: [{ startUTC: validFrom || FAR_PAST, endUTC: validTo || FAR_FUTURE, raw: '' }],
+        validFrom: validFrom, validTo: validTo,
+        remarks: n.body,
+        qCode: '',
+        category: classifyNationalNotam(n),
+        fir: n.fir || 'ES',
+        aerodrome: n.aerodrome || '',
+        section: n.section || '',
+        _isWorkArea: false,
+        _isPermanent: !!n.is_permanent,
+        _isEstimate: !!n.is_estimate,
+        _isCircle: isCircle,
+        _circleRadiusNm: radiusNm != null ? Math.round(radiusNm * 10) / 10 : null,
+        _noGeometry: false,
+        _largeCircle: isCircle && radiusNm != null && radiusNm > 75,
+        _foreign: false,
+        _national: true,
+        country: 'ES',
+      });
+    }
+    console.info('[notamHub] convertNational: ' + (list.length) + ' -> ' + withGeom + ' con geometría · ' + skipped + ' sin coords (omitidos)');
+    return out;
+  }
+
   return {
     BASE,
     ping,
@@ -958,6 +1100,10 @@ window.NotamHub.notamHub = (function () {
     fetchForeignByBbox,
     fetchForeignNew,
     fetchForeignAll,
+    fetchNationalNotams,
+    convertNationalNotamsToInternal,
+    parseSpanishNotamGeometry,
+    classifyNationalNotam,
     normalizeForeignNotam,
     convertForeignToInternal,
     classifyForeignNotam,

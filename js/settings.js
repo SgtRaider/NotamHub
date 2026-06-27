@@ -20,7 +20,7 @@ window.NotamHub.settings = (function () {
   const DEFAULTS = {
     opacity: {
       country:   1.00,
-      tsaFill:   0.30,
+      tsaFill:   0.40,
       cloudRV:   0.60,
       cloudCTH:  0.70,
       cloudLI:   0.80,   // MTG Lightning AFA (LI)

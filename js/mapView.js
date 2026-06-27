@@ -59,10 +59,11 @@ window.NotamHub.mapView = (function () {
   // color cian distintivo. Si tiene el flag _isWorkArea (NotamHub), usa
   // AREA_COLORS. Si no, fallback a la banda vertical.
   function tsaColor(tsa) {
-    if (tsa && tsa._foreign === true) {
+    // NOTAM con categoría (nacional o extranjero) -> color de su categoría.
+    if (tsa && tsa.category) {
       const nh = window.NotamHub.notamHub;
       const meta = nh && nh.getForeignCategoryMeta ? nh.getForeignCategoryMeta(tsa.category) : null;
-      return (meta && meta.color) || FOREIGN_COLOR;
+      if (meta && meta.color) return meta.color;
     }
     if (tsa && typeof tsa._isWorkArea === 'boolean') {
       return tsa._isWorkArea ? AREA_COLORS.work : AREA_COLORS.transit;
@@ -1441,7 +1442,7 @@ window.NotamHub.mapView = (function () {
     _setAreasLegendVisible(true);
     _renderAreasLegend(tsas);
 
-    const tsaOpacity = settingsGet('opacity.tsaFill', 0.30);
+    const tsaOpacity = settingsGet('opacity.tsaFill', 0.40);
     // Snapshot del listado para el handler de click (cierra sobre tsas).
     const tsaList = tsas.slice();
     // Render: áreas grandes primero (debajo) y pequeñas después (encima),
@@ -1450,16 +1451,15 @@ window.NotamHub.mapView = (function () {
     for (const tsa of ordered) {
       if (!tsa.polygon || tsa.polygon.length < 3) continue;   // sin geometría dibujable
       const color = tsaColor(tsa);
-      const isForeign = tsa && tsa._foreign === true;
       const area = _approxAreaDeg(tsa.polygon);
-      // NOTAMs extranjeros: color por categoría, trazo dashed y relleno más
-      // ligero (aún más en áreas enormes, para no tapar el mapa).
-      const fill = isForeign ? (area > 3 ? 0.05 : 0.15) : tsaOpacity;
+      // Relleno por el slider (default 0.40); áreas enormes algo más
+      // translúcidas para no tapar el mapa. Trazo grueso y opaco para que
+      // resalte sobre la imagen de satélite.
+      const fill = area > 6 ? Math.min(tsaOpacity, 0.20) : tsaOpacity;
       const poly = L.polygon(tsa.polygon, {
-        color, weight: isForeign && area > 3 ? 1.5 : 2,
+        color, weight: 2.5, opacity: 1,
         fillColor: color,
         fillOpacity: fill,
-        dashArray: isForeign ? '5 4' : null,
         pane: 'tsaPane',
       });
       // En lugar de un popup por poligono (que esconde los solapados),
