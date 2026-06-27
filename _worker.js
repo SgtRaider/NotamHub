@@ -21,6 +21,12 @@ const AWC_UPSTREAM = 'https://aviationweather.gov/api/data';
 // el suyo vía cabecera x-user-token.
 const DEFAULT_NOTAMHUB_TOKEN = 'FPIy1bgWG5gGRviMKSxeLInxZvjD1KYhILgof0WVgfg';
 
+// Token de admin (scope admin) para endpoints/datos protegidos (x-admin-token)
+// de la API ICARO. Por seguridad NO se incluye un valor por defecto en el
+// código: se toma de la env var/secreto NOTAMHUB_ADMIN_TOKEN (o de la cabecera
+// x-admin-token que envíe el cliente). Configúralo con:
+//   npx wrangler secret put NOTAMHUB_ADMIN_TOKEN
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -65,8 +71,12 @@ async function proxyNotamhub(request, env, url) {
   const clientToken = request.headers.get('x-user-token');
   const token = clientToken || (env && env.NOTAMHUB_USER_TOKEN) || DEFAULT_NOTAMHUB_TOKEN;
 
+  const clientAdmin = request.headers.get('x-admin-token');
+  const adminToken = clientAdmin || (env && env.NOTAMHUB_ADMIN_TOKEN) || '';
+
   const headers = { 'User-Agent': 'NotamHub-Worker/1.0', 'Accept': 'application/json' };
   if (token) headers['x-user-token'] = token;
+  if (adminToken) headers['x-admin-token'] = adminToken;
 
   const init = { method: request.method, headers };
   if (request.method === 'POST') {

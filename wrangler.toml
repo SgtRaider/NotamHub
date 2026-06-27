@@ -4,8 +4,9 @@
 #   npx wrangler dev           # desarrollo local (con los proxies /api/* activos)
 #
 # El Worker (_worker.js) sirve los estáticos vía el binding ASSETS y hace de
-# proxy de /api/notamhub/* y /api/awc/*. Define el token como secreto:
+# proxy de /api/notamhub/* y /api/awc/*. Define los tokens como secretos:
 #   npx wrangler secret put NOTAMHUB_USER_TOKEN
+#   npx wrangler secret put NOTAMHUB_ADMIN_TOKEN
 name = "notamhub"
 main = "_worker.js"
 compatibility_date = "2024-11-01"

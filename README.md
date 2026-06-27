@@ -89,10 +89,16 @@ Despliega a `https://<name>.<subdominio>.workers.dev` usando `wrangler.toml`
 
 ```sh
 npx wrangler secret put NOTAMHUB_USER_TOKEN
+npx wrangler secret put NOTAMHUB_ADMIN_TOKEN
 ```
 
-Si no se define, el proxy usa un token por defecto incluido en `_worker.js`
-(suficiente para arrancar; recomendable rotarlo y moverlo al secreto).
+El proxy inyecta `x-user-token` (scope user) y `x-admin-token` (scope admin,
+para endpoints/datos protegidos de la API ICARO):
+
+- `NOTAMHUB_USER_TOKEN` — tiene un valor por defecto en `_worker.js` para que
+  arranque sin configurar nada (recomendable rotarlo y moverlo al secreto).
+- `NOTAMHUB_ADMIN_TOKEN` — por seguridad **no** hay valor por defecto en el
+  código; defínelo como secreto para habilitar el scope admin.
 
 **Cloudflare Pages** también funciona: `_worker.js` en la raíz activa el
 *advanced mode* (sirve `env.ASSETS` + los proxies), sin necesidad de `functions/`.
