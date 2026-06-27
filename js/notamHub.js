@@ -393,11 +393,11 @@ window.NotamHub.notamHub = (function () {
         const seenInner = new Set();
         schedules = t.schedules
           .map(w => ({
-            startUTC: new Date(w.start),
-            endUTC:   new Date(w.end),
+            startUTC: _toUTCDate(w.start),
+            endUTC:   _toUTCDate(w.end),
             raw:      w.raw || `${w.start} / ${w.end}`,
           }))
-          .filter(w => !isNaN(w.startUTC.getTime()) && !isNaN(w.endUTC.getTime()))
+          .filter(w => w.startUTC && w.endUTC && !isNaN(w.startUTC.getTime()) && !isNaN(w.endUTC.getTime()))
           .filter(w => {
             const sig = w.startUTC.getTime() + '-' + w.endUTC.getTime();
             if (seenInner.has(sig)) return false;
@@ -428,10 +428,15 @@ window.NotamHub.notamHub = (function () {
         rawBlock: `TSA ${t.name}\nNOTAM ${t.parent_notam_id || '?'}\n` +
                   `${lowerLabel} / ${upperLabel}\n` +
                   `${schedules.length} ventana(s) horaria(s).`,
+        // Vigencia REAL del NOTAM/TSA (span total, no recortado a la búsqueda).
+        validFrom: _toUTCDate(t.schedule_min_start),
+        validTo:   _toUTCDate(t.schedule_max_end),
         _source: 'notamhub',
         _parentNotam: t.parent_notam_id,
         _nSchedules: schedules.length,
         _isCircle: !!t.is_circle,
+        _circleRadiusNm: Number.isFinite(t.circle_radius_nm) ? t.circle_radius_nm : null,
+        _largeCircle: !!t.is_circle && Number.isFinite(t.circle_radius_nm) && t.circle_radius_nm > 75,
         // is_work_area:
         //   - Si el API lo discrimina (mix de true/false) -> lo usamos.
         //   - Si el API manda todo true o todo undefined ->
@@ -502,6 +507,14 @@ window.NotamHub.notamHub = (function () {
         const sb = b.startUTC instanceof Date ? b.startUTC.getTime() : Date.parse(b.startUTC);
         return sa - sb;
       });
+      // Vigencia real: que cubra todas las ventanas tras la fusión.
+      if (t.schedules.length) {
+        const ms = (d) => d instanceof Date ? d.getTime() : Date.parse(d);
+        const minS = new Date(Math.min.apply(null, t.schedules.map(s => ms(s.startUTC))));
+        const maxE = new Date(Math.max.apply(null, t.schedules.map(s => ms(s.endUTC))));
+        if (!(t.validFrom instanceof Date) || isNaN(t.validFrom.getTime()) || minS < t.validFrom) t.validFrom = minS;
+        if (!(t.validTo instanceof Date) || isNaN(t.validTo.getTime()) || maxE > t.validTo) t.validTo = maxE;
+      }
       dedupedOut.push(t);
     }
     console.info(`[notamHub] convertTSAs: ${apiList.length} entrada(s) → ${dedupedOut.length} TSAs ` +
@@ -828,9 +841,12 @@ window.NotamHub.notamHub = (function () {
         continue;
       }
 
+      const radiusNm = Number.isFinite(n.radius_nm) ? n.radius_nm : null;
+      const isCircle = n.geometry_type === 'circle';
       out.push({
         id: 'FN_' + (n.notam_number || out.length),
         name: (n.notam_number || '') + ' ' + (n.country || ''),
+        format: 'NOTAM',
         polygon,
         centroid: polygonCentroid(polygon),
         vertical: {
@@ -844,11 +860,24 @@ window.NotamHub.notamHub = (function () {
           endUTC:   _toUTCDate(n.valid_to, FAR_FUTURE),
           raw:      n.schedule_raw || (n.is_permanent ? 'PERM' : ''),
         }],
-        remarks: n.body,
-        qCode: n.q_code || '',
-        category: classifyForeignNotam(n),
+        // Vigencia REAL del NOTAM (no recortada a la búsqueda).
+        validFrom: _toUTCDate(n.valid_from),
+        validTo:   _toUTCDate(n.valid_to),
+        remarks:   n.body,
+        qCode:     n.q_code || '',
+        category:  classifyForeignNotam(n),
+        scope:     n.scope || '',
+        traffic:   n.traffic || '',
+        purpose:   n.purpose || '',
+        fir:       n.fir || '',
+        airport:   n.airport_name || '',
         _isWorkArea: false,
         _isPermanent: !!n.is_permanent,
+        _isEstimate: !!n.is_estimate,
+        _military: !!n.military,
+        _isCircle: isCircle,
+        _circleRadiusNm: radiusNm,
+        _largeCircle: isCircle && radiusNm != null && radiusNm > 75,
         _foreign: true,
         country: n.country,
       });

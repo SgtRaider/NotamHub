@@ -304,3 +304,55 @@
   white-space: pre-wrap;
   color: var(--text-mute);
 }
+
+/* ════════════════════════════════════════════════════════════════
+   4. Tabla "Datos": filas expandibles con la info completa del NOTAM
+   ════════════════════════════════════════════════════════════════ */
+.tsa-row { cursor: pointer; }
+.tsa-row .row-caret {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-mute);
+  font-size: 10px;
+  transition: transform 0.12s ease;
+}
+.tsa-row.expanded .row-caret { transform: rotate(90deg); }
+.tsa-row.is-largecircle > td { opacity: 0.5; }     /* círculo > 75 NM (oculto del mapa) */
+.tsa-row.is-largecircle.expanded > td { opacity: 1; }
+
+.badge-lc {
+  display: inline-block;
+  background: rgba(245, 158, 11, 0.18);
+  color: var(--warn);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tsa-detail-row > td { background: rgba(0, 0, 0, 0.18); padding: 10px 14px; }
+.tsa-detail {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 14px;
+  font-size: 12px;
+  align-items: start;
+}
+.tsa-detail .d-k { color: var(--text-mute); font-weight: 600; white-space: nowrap; }
+.tsa-detail .d-v { color: var(--text); min-width: 0; }
+.tsa-detail .lc-warn { color: var(--warn); }
+.tsa-detail .d-body {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  font-family: 'Archivo', Arial, sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 240px;
+  overflow: auto;
+}

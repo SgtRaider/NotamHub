@@ -86,24 +86,38 @@
     items.forEach((t) => {
       const tr = document.createElement('tr');
       tr.dataset.uid = t._uid;
+      tr.className = 'tsa-row';
+      if (t._largeCircle) tr.classList.add('is-largecircle');
       const inFilter = f && f.matches ? safeMatches(f, t) : true;
       if (!inFilter) tr.classList.add('out-of-filter');
       const checked = state.selected.has(t._uid) ? 'checked' : '';
-      const windows = t._isPermanent
+      // Columna de fechas = vigencia REAL del NOTAM (no recortada a la búsqueda).
+      const validity = t._isPermanent
         ? '<span class="badge">Permanente</span>'
-        : ((t.schedules && sf && sf.listHTML) ? sf.listHTML(t.schedules) : '');
+        : (esc(fmtDate(t.validFrom)) + ' → ' + esc(fmtDate(t.validTo)));
+      const nWin = (t.schedules && t.schedules.length) || 0;
+      const winHint = (!t._isPermanent && nWin > 1) ? ' <span class="dim">(' + nWin + ' vent.)</span>' : '';
+      const lcNote = t._largeCircle
+        ? ' <span class="badge badge-lc" title="Círculo de radio &gt; 75 NM: oculto del mapa por defecto">⊘ ' + Math.round(t._circleRadiusNm) + ' NM</span>'
+        : '';
       const origin = t._foreign
         ? ('Ext.' + (t.country ? ' ' + esc(t.country) : '') + catBadgeHTML(t))
         : 'Nacional';
       tr.innerHTML =
         '<td class="col-check"><input type="checkbox" class="tsa-row-cb" ' + checked + '></td>' +
-        '<td>' + esc(t.name || '—') + '</td>' +
+        '<td class="col-name"><span class="row-caret">▸</span>' + esc(t.name || '—') + lcNote + '</td>' +
         '<td>' + origin + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.lowerLabel) || 'GND') + '</td>' +
         '<td>' + esc((t.vertical && t.vertical.upperLabel) || 'UNL') + '</td>' +
         '<td>' + ((t.polygon && t.polygon.length) || 0) + '</td>' +
-        '<td class="col-windows">' + (windows || '<span class="dim">—</span>') + '</td>';
+        '<td class="col-windows">' + validity + winHint + '</td>';
       tbody.appendChild(tr);
+      // Fila de detalle (colapsada) con TODA la información del NOTAM.
+      const dr = document.createElement('tr');
+      dr.className = 'tsa-detail-row';
+      dr.style.display = 'none';
+      dr.innerHTML = '<td colspan="7">' + buildDetailHTML(t) + '</td>';
+      tbody.appendChild(dr);
     });
     if (wrap) {
       wrap.classList.toggle('hidden', items.length === 0);
@@ -120,6 +134,53 @@
     const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(t.category) : null;
     if (!meta) return '';
     return ' <span class="cat-badge" style="background:' + meta.color + '">' + esc(meta.label) + '</span>';
+  }
+  function catLabel(t) {
+    const nh = notamHub();
+    const meta = (nh && nh.getForeignCategoryMeta) ? nh.getForeignCategoryMeta(t.category) : null;
+    return meta ? meta.label : '';
+  }
+  const MONTHS_ES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  function fmtDate(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return p(d.getUTCDate()) + ' ' + MONTHS_ES[d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+  }
+  function fmtDateTime(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '—';
+    const p = (n) => String(n).padStart(2, '0');
+    return fmtDate(d) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + 'Z';
+  }
+  function realValidity(t) {
+    if (t._isPermanent) return 'Permanente';
+    return esc(fmtDateTime(t.validFrom)) + ' → ' + esc(fmtDateTime(t.validTo));
+  }
+  // Panel de detalle con TODA la información disponible del NOTAM.
+  function buildDetailHTML(t) {
+    const sf = scheduleFmt();
+    const rows = [];
+    const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push('<div class="d-k">' + esc(k) + '</div><div class="d-v">' + v + '</div>'); };
+    if (t._foreign) {
+      add('Categoría', esc(catLabel(t)));
+      add('País / FIR', esc([t.country, t.fir].filter(Boolean).join(' / ')));
+      add('Q-code', esc(t.qCode));
+      add('Scope', esc(t.scope));
+      add('Tráfico', esc(t.traffic));
+      add('Propósito', esc(t.purpose));
+      add('Aeropuerto', esc(t.airport));
+      if (t._military) add('Militar', 'Sí');
+    } else {
+      add('Tipo', t._isWorkArea ? 'Área de trabajo' : 'Área de tránsito');
+      add('NOTAM(s) padre', esc(t._parentNotam));
+    }
+    add('Altitud', esc((t.vertical && t.vertical.lowerLabel) || 'GND') + ' → ' + esc((t.vertical && t.vertical.upperLabel) || 'UNL'));
+    add('Vértices', (t.polygon && t.polygon.length) || 0);
+    if (t._isCircle) add('Círculo', (t._circleRadiusNm != null ? Math.round(t._circleRadiusNm) + ' NM de radio' : 'sí') + (t._largeCircle ? ' · <b class="lc-warn">oculto del mapa (&gt;75 NM)</b>' : ''));
+    add('Vigencia real', realValidity(t));
+    if (!t._isPermanent && t.schedules && sf && sf.listHTML) add('Ventanas horarias', sf.listHTML(t.schedules));
+    if (t._isEstimate) add('Estimado', 'Sí (EST)');
+    if (t._foreign && t.remarks) rows.push('<div class="d-k">Texto NOTAM</div><div class="d-v"><pre class="d-body">' + esc(t.remarks) + '</pre></div>');
+    return '<div class="tsa-detail">' + rows.join('') + '</div>';
   }
 
   function updateSelectionSummary() {
@@ -154,7 +215,7 @@
       if (wantForeign) { await loadForeign(false); }
       else { state.foreign = []; }
       assignUids();
-      selectAll();
+      selectDefault();
       setStatus(statusEl, state.national.length + ' áreas nacionales' +
         (state.foreign.length ? (' · ' + state.foreign.length + ' extranjeras') : '') + ' cargadas.', 'ok');
       renderAll();
@@ -176,8 +237,9 @@
       const apiList = await nh.fetchForeignByBbox(bbox, params);
       state.foreign = nh.convertForeignToInternal ? (nh.convertForeignToInternal(apiList, state.at ? new Date(state.at) : new Date()) || []) : [];
       assignUids();
-      // Nuevos extranjeros entran seleccionados por defecto.
-      state.foreign.forEach((t) => state.selected.add(t._uid));
+      // Nuevos extranjeros entran seleccionados por defecto, EXCEPTO los
+      // círculos > 75 NM (quedan ocultos hasta marcarlos a mano).
+      state.foreign.forEach((t) => { if (!t._largeCircle) state.selected.add(t._uid); });
       if (rerender) renderAll();
     } catch (err) { console.warn('[app] foreign bbox falló:', err); }
   }
@@ -203,6 +265,9 @@
   // ── Selección ─────────────────────────────────────────────────────
   function selectAll() { state.selected = new Set(allItems().map((t) => t._uid)); }
   function selectNone() { state.selected = new Set(); }
+  // Selección por defecto al cargar: todo MENOS los círculos > 75 NM (quedan
+  // ocultos del mapa hasta que el usuario los marque a mano en la tabla).
+  function selectDefault() { state.selected = new Set(allItems().filter((t) => !t._largeCircle).map((t) => t._uid)); }
 
   function wireSelection() {
     const tbody = $('#tsa-table tbody');
@@ -217,6 +282,18 @@
         updateSelectionSummary();
         renderViews();
         updateFilterCounts();
+      });
+      // Click en la fila (fuera del checkbox) despliega/oculta el detalle.
+      tbody.addEventListener('click', (e) => {
+        if (e.target.closest('.col-check')) return;
+        const row = e.target.closest('tr.tsa-row');
+        if (!row) return;
+        const dr = row.nextElementSibling;
+        if (dr && dr.classList.contains('tsa-detail-row')) {
+          const isOpen = dr.style.display !== 'none';
+          dr.style.display = isOpen ? 'none' : '';
+          row.classList.toggle('expanded', !isOpen);
+        }
       });
     }
     const allBtn = $('#btn-select-all');
