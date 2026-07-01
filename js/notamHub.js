@@ -17,10 +17,17 @@ window.NotamHub = window.NotamHub || {};
 window.NotamHub.notamHub = (function () {
   'use strict';
 
-  // Llamada DIRECTA a la API duckdns. Requiere CORS habilitado en el FastAPI
-  // (allow_origins con el dominio de la web + allow_headers x-user-token /
-  // x-admin-token). El token de usuario viaja en la cabecera desde el cliente.
-  const BASE = 'https://notamhub.duckdns.org';
+  // Selección de destino según entorno:
+  //  - PRODUCCIÓN (desplegado en Cloudflare): usamos el proxy same-origin
+  //    /api/notamhub/* del _worker.js, que reenvía a notamhub.duckdns.org e
+  //    inyecta el token desde el secret del servidor. Así evitamos llamar
+  //    directo a DuckDNS (bloqueado como "dynamic DNS" en redes con firewall
+  //    restrictivo, que sí dejan pasar a Cloudflare) y no exponemos el token.
+  //  - LOCAL (file:// o localhost): no hay proxy; vamos DIRECTOS a DuckDNS
+  //    (requiere CORS en el FastAPI) y el cliente envía el token por defecto.
+  const ON_REMOTE = !/^(?:localhost|127\.0\.0\.1)$/i.test(location.hostname) &&
+                    location.protocol !== 'file:';
+  const BASE = ON_REMOTE ? '/api/notamhub' : 'https://notamhub.duckdns.org';
 
   // Token de usuario (scope user) por defecto — el mismo que ya es público en
   // el repo. El usuario puede sobreescribirlo por localStorage. NOTA: en modo
@@ -48,14 +55,22 @@ window.NotamHub.notamHub = (function () {
 
   function buildHeaders() {
     const h = { 'Accept': 'application/json' };
-    h['x-user-token'] = getStoredToken() || DEFAULT_USER_TOKEN;
+    // En REMOTO el proxy (_worker.js) inyecta el token desde el secret del
+    // servidor cuando el cliente no lo manda, así que NO enviamos el token por
+    // defecto (no viaja al navegador). Si el usuario guardó uno propio, se
+    // respeta como override. En LOCAL (directo a DuckDNS) sí lo enviamos.
+    const stored = getStoredToken();
+    const token = ON_REMOTE ? stored : (stored || DEFAULT_USER_TOKEN);
+    if (token) h['x-user-token'] = token;
     const admin = getStoredAdminToken();
     if (admin) h['x-admin-token'] = admin;
     return h;
   }
 
   function buildUrl(path, qs) {
-    const url = new URL(BASE + path);
+    // Con BASE relativo ('/api/notamhub') new URL() de un solo argumento lanza;
+    // pasamos la base: el origin propio en remoto, DuckDNS en local.
+    const url = new URL(BASE + path, ON_REMOTE ? location.origin : 'https://notamhub.duckdns.org');
     if (qs) {
       for (const [k, v] of Object.entries(qs)) {
         if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, v);
