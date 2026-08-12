@@ -1,0 +1,4 @@
+Marcador para forzar rebuild de Cloudflare Pages.
+Motivo: desplegar el fix del proxy /api/notamhub (commit 8da3c36, SW v26),
+que en produccion aun servia el notamHub.js antiguo (v25, directo a DuckDNS).
+Trigger: 2026-07-01T20:40Z
