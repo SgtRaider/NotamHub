@@ -9,7 +9,7 @@
  * Para forzar invalidación al desplegar nueva versión, sube CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'notamhub-v26';
+const CACHE_VERSION = 'notamhub-v27';
 const SHELL_CACHE   = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 
@@ -34,10 +34,13 @@ const SHELL_ASSETS = [
   './js/pdfExport.js',
   './js/app.js',
   './js/shell.js',
-  // Librerías CDN (otro origen, pero las cacheamos para uso offline)
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
-  'https://unpkg.com/jspdf@2.5.2/dist/jspdf.umd.min.js',
+  // Librerías y fuentes SELF-HOSTED (mismo origen, sin dependencias externas).
+  // Las imágenes de Leaflet (images/*.png) y los woff2 se cachean en runtime
+  // (cache-first) al ser mismo origen.
+  './vendor/leaflet/leaflet.css',
+  './vendor/leaflet/leaflet.js',
+  './vendor/jspdf/jspdf.umd.min.js',
+  './fonts/fonts.css',
 ];
 
 // Hosts que deben ir siempre por red (datos en tiempo real). Sin esto la
